@@ -2801,7 +2801,7 @@ def set_high_priority():
     except:
         pass
 
-if __name__ == '__main__':
+def main():
 
     multiprocessing.freeze_support()
     set_high_priority()
@@ -2848,5 +2848,18 @@ if __name__ == '__main__':
 
 
     app.MainLoop()
-    sys.exit(0)
 
+
+if __name__ == '__main__':
+    import cProfile
+    import pstats
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+
+    main()
+
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('cumtime')  # or 'tottime'
+    stats.print_stats(100)  # print top 30 slowest functions
+    sys.exit(0)
