@@ -529,7 +529,7 @@ def load_library_data_JSON_ONLY():
     return data
 
 
-def load_library_data():
+def load_library_data_old():
     """Load library data from parquet or json file"""
     import os
 
@@ -573,6 +573,49 @@ def load_library_data():
     else:
         raise FileNotFoundError("Neither parquet nor json library file found")
 
+def load_library_data(): # improved performance by factor of 40x
+    """Load library data from parquet or json file"""
+    import os
+
+    parquet_file = 'KherveFitting_library.parquet'
+    json_file = 'KherveFitting_library.json'
+
+    if os.path.exists(parquet_file):
+        print("Convert Parquet Database")
+        import pandas as pd
+        df = pd.read_parquet(parquet_file)
+
+        # Use itertuples() for faster iteration
+        data = {}
+        for row in df.itertuples(index=False):
+            key = (row.element, row.orbital)
+            if key not in data:
+                data[key] = {}
+            data[key][row.instrument] = {
+                'position': row.position,
+                'ds': row.ds,
+                'rsf': row.rsf,
+                'full_name': row.full_name,
+                'auger': row.auger,
+                'ke_be': row.ke_be
+            }
+        return data
+
+    elif os.path.exists(json_file):
+        print("Convert Json Database")
+        import json
+        with open(json_file, 'r') as f:
+            json_data = json.load(f)
+
+        # Convert string keys back to tuples
+        data = {}
+        for k, v in json_data.items():
+            element, orbital = k.split('_')
+            data[(element, orbital)] = v
+        return data
+
+    else:
+        raise FileNotFoundError("Neither parquet nor json library file found")
 
 
 

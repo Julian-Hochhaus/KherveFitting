@@ -259,6 +259,7 @@ class MyFrame(wx.Frame):
         self.be_correction = 0.00
 
         self.current_instrument = 'A-ALTHERMO01'  # Default instrument
+        #self.library_data = load_library_data_old()
         self.library_data = load_library_data()
         # data, instruments = load_library_data()
 
@@ -2861,5 +2862,7 @@ if __name__ == '__main__':
 
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')  # or 'tottime'
-    stats.print_stats(100)  # print top 30 slowest functions
+    stats.print_stats(30)  # print top 30 slowest functions
+    stats.print_stats("load_library_data")
+
     sys.exit(0)
