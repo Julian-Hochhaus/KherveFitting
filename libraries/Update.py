@@ -68,15 +68,17 @@ class UpdateChecker:
             print(f"Download failed: {e}")
 
     def check_update_delayed(self, window):
-        def delayed_check():
-            time.sleep(3)
+        def start_check():
+            thread = threading.Thread(target=check_and_notify)
+            thread.daemon = True
+            thread.start()
+
+        def check_and_notify():
             needs_update, latest_version = self.check_latest_version()
             if needs_update:
                 wx.CallAfter(lambda: self.show_update_dialog(window, latest_version))
 
-        thread = threading.Thread(target=delayed_check)
-        thread.daemon = True
-        thread.start()
+        wx.CallLater(3000, start_check)
 
     def show_update_dialog(self, window, latest_version):
         if wx.MessageBox(f"A new version ({latest_version}) is available. Would you like to download it now?\n\n"

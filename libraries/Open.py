@@ -2788,7 +2788,7 @@ def open_xlsx_file_OLD(window, file_path=None):
         wx.MessageBox(f"Error reading file: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 
 
-def open_xlsx_file(window, file_path=None):
+def open_xlsx_file_old(window, file_path=None):
     if file_path is None:
         with wx.FileDialog(window, "Open XLSX file", wildcard="Excel files (*.xlsx)|*.xlsx",
                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
@@ -2942,6 +2942,159 @@ def open_xlsx_file(window, file_path=None):
     except Exception as e:
         wx.MessageBox(f"Error reading file: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 
+def open_xlsx_file(window, file_path=None): #trying to optimize speed
+    if file_path is None:
+        with wx.FileDialog(window, "Open XLSX file", wildcard="Excel files (*.xlsx)|*.xlsx",
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                file_path = dlg.GetPath()
+            else:
+                return
+
+    # Store file manager state
+    file_manager_was_open = False
+    file_manager_position = None
+    try:
+        if hasattr(window, 'file_manager') and window.file_manager is not None and window.file_manager.IsShown():
+            file_manager_was_open = True
+            file_manager_position = window.file_manager.GetPosition()
+            window.file_manager.Close()
+            window.file_manager = None
+    except RuntimeError:
+        window.file_manager = None
+
+    try:
+        # Create console window centered on parent
+        parent_pos = window.GetPosition()
+        parent_size = window.GetSize()
+        console_frame = wx.Frame(window, title="Loading Excel File", size=(300, 350))
+        console_frame.SetPosition((
+            parent_pos.x + (parent_size.width - 300) // 2,
+            parent_pos.y + (parent_size.height - 350) // 2
+        ))
+        console_text = wx.TextCtrl(console_frame, style=wx.TE_MULTILINE | wx.TE_READONLY)
+        console_frame.Show()
+
+        def update_console(message):
+            console_text.AppendText(message + '\n')
+            console_text.Update()
+            wx.SafeYield()
+
+        update_console("Initializing...")
+        window.SetStatusText(f"Selected File: {file_path}", 0)
+
+        # Clear history and results
+        window.history = []
+        window.redo_stack = []
+        update_undo_redo_state(window)
+        window.results_grid.ClearGrid()
+        if window.results_grid.GetNumberRows() > 0:
+            window.results_grid.DeleteRows(0, window.results_grid.GetNumberRows())
+
+        # Check for JSON file
+        json_file = os.path.splitext(file_path)[0] + '.json'
+        json_data_loaded = False
+        if os.path.exists(json_file):
+            update_console("Found corresponding JSON file - loading saved data...")
+            with open(json_file, 'r') as f:
+                loaded_data = json.load(f)
+            window.Data = convert_from_serializable(loaded_data)
+            json_data_loaded = True
+            populate_results_grid(window)
+        else:
+            update_console("Initializing new data structure...")
+            window.Data = Init_Measurement_Data(window)
+
+        # Read Excel file
+        update_console("Reading Excel file structure...")
+        excel_file = pd.ExcelFile(file_path)
+        all_sheet_names = excel_file.sheet_names
+        sheet_names = [name for name in all_sheet_names if
+                       name.lower() not in ["results table", "experimental description"]]
+
+        # Validation
+        invalid_sheets = [name for name in sheet_names if name.startswith('Sheet')]
+        if invalid_sheets:
+            console_frame.Close()
+            wx.MessageBox(f"File contains invalid sheet names: {', '.join(invalid_sheets)}", "Invalid Sheet Names",
+                          wx.OK | wx.ICON_WARNING)
+            return
+
+        for sheet_name in sheet_names:
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=1) #only read first row for header validation
+            col1_value = str(df.iloc[0, 0]).strip().upper()
+            col2_value = str(df.iloc[0, 1]).strip().upper()
+
+            xps_valid = ('BE' in col1_value or 'BINDING' in col1_value) and \
+                        ('RAW DATA' in col2_value or 'CORRECTED DATA' in col2_value or 'INTENSITY' in col2_value)
+            raman_valid = ('WAVENUMBER' in col1_value or 'CM-1' in col1_value) and \
+                          ('RAW DATA' in col2_value or 'INTENSITY' in col2_value)
+
+            if not (xps_valid or raman_valid):
+                console_frame.Close()
+                wx.MessageBox(f"Sheet '{sheet_name}' has invalid column labels", "Invalid Column Labels",
+                              wx.OK | wx.ICON_WARNING)
+                return
+
+        window.Data['FilePath'] = file_path
+        update_console(f"Found {len(sheet_names)} sheets to process...")
+
+        # Load core level data
+        if not json_data_loaded and ('Core levels' not in window.Data or not window.Data['Core levels']):
+            window.Data['Number of Core levels'] = 0
+            for i, sheet_name in enumerate(sheet_names, 1):
+                update_console(f"Loading sheet {i}/{len(sheet_names)}: {sheet_name}")
+                window.Data = add_core_level_Data(window.Data, window, file_path, sheet_name)
+        else:
+            update_console("Data loaded from JSON file...")
+            update_console("Available sheets:")
+            for i, sheet_name in enumerate(sheet_names, 1):
+                update_console(f"  {i}/{len(sheet_names)}: {sheet_name}")
+
+        update_console("Loading BE corrections...")
+        window.load_be_correction()
+
+        update_console("Setting up interface...")
+        window.sheet_combobox.Clear()
+        window.sheet_combobox.AppendItems(sheet_names)
+        first_sheet = sheet_names[0]
+        window.sheet_combobox.SetValue(first_sheet)
+
+        event = wx.CommandEvent(wx.EVT_COMBOBOX.typeId)
+        event.SetString(first_sheet)
+        window.plot_config.plot_limits.clear()
+        on_sheet_selected(window, event)
+
+        save_state(window)
+        update_recent_files(window, file_path)
+
+        if hasattr(window, 'setup_backup_timer'):
+            window.setup_backup_timer()
+
+
+        # Create backup before opening file
+        from libraries.Utilities import perform_auto_backup
+        update_console("Performing auto backup...")
+        perform_auto_backup(window)
+
+        # Refresh Sheet
+        update_console("Refreshing sheets...")
+        from libraries.Save import refresh_sheets
+        refresh_sheets(window, on_sheet_selected, update_console)
+
+        update_console("File loaded successfully!")
+        wx.CallLater(500, console_frame.Close)
+
+        # Restore file manager
+        if file_manager_was_open:
+            from libraries.FileManager import FileManagerWindow
+            window.file_manager = FileManagerWindow(window)
+            if file_manager_position:
+                window.file_manager.SetPosition(file_manager_position)
+            window.file_manager.Show()
+
+    except Exception as e:
+        wx.MessageBox(f"Error reading file: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 def convert_from_serializable(obj):
     """
     Recursively converts a serializable object (list or dict) back into its original structure.
