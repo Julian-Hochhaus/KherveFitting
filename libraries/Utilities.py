@@ -162,7 +162,7 @@ class DraggableText:
             try:
                 angle = float(dlg.GetValue())
                 self.text.set_rotation(angle)
-                self.text.figure.canvas.draw()
+                self.text.figure.canvas.draw_idle()
             except ValueError:
                 wx.MessageBox('Please enter a valid number', 'Error')
         dlg.Destroy()
@@ -174,14 +174,14 @@ class DraggableText:
             try:
                 size = float(dlg.GetValue())
                 self.text.set_fontsize(size)
-                self.text.figure.canvas.draw()
+                self.text.figure.canvas.draw_idle()
             except ValueError:
                 wx.MessageBox('Please enter a valid number', 'Error')
         dlg.Destroy()
 
     def on_delete(self, event):
         self.text.remove()
-        self.text.figure.canvas.draw()
+        self.text.figure.canvas.draw_idle()
 
     def on_press(self, event):
         if event.button != 1: return
@@ -197,7 +197,7 @@ class DraggableText:
         dx = event.xdata - xpress
         dy = event.ydata - ypress
         self.text.set_position((pos[0] + dx, pos[1] + dy))
-        self.text.figure.canvas.draw()
+        self.text.figure.canvas.draw_idle()
 
     def on_release(self, event):
         self.press = None
@@ -207,7 +207,7 @@ class DraggableText:
             contains, _ = self.text.contains(event)
             if contains:
                 self.text.remove()
-                self.text.figure.canvas.draw()
+                self.text.figure.canvas.draw_idle()
 
 
 def add_draggable_text(window):
@@ -251,7 +251,7 @@ def on_canvas_click(event):
         })
 
         draggable = DraggableText(annotation)
-        window.canvas.draw()
+        window.canvas.draw_idle()
     dlg.Destroy()
 
     window.text_mode = False
@@ -297,7 +297,7 @@ def on_delete_sheet(window, event):
         # Clear plots if no sheets remain
         if window.sheet_combobox.GetCount() == 0:
             window.ax.clear()
-            window.canvas.draw()
+            window.canvas.draw_idle()
 
         # Refresh sheets after deletion
         try:

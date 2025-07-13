@@ -457,7 +457,7 @@ class ThickogramWindow(wx.Frame):
 
         # Adjust layout to fit smaller figure
         self.figure.tight_layout(pad=0.5)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def plot_thickogram(self, xthicko, Ioisro, Eoes):
         """Plot the thickogram"""
@@ -665,7 +665,7 @@ class ThickogramWindow(wx.Frame):
 
         # Adjust layout to fit smaller figure
         self.figure.tight_layout(pad=0.5)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def plot_empty_thickogram(self):
         """Plot the empty thickogram without results"""
@@ -784,7 +784,7 @@ class ThickogramWindow(wx.Frame):
 
         # Adjust layout to fit smaller figure
         self.figure.tight_layout(pad=0.5)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_about(self, event):
         """Show about dialog"""

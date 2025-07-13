@@ -1043,7 +1043,7 @@ class PlotFrame(wx.Frame):
                 transform=ax.transAxes, ha='right', va='top',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
 
 class ElementPropertiesDialog(wx.Dialog):

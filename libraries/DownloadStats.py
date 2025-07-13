@@ -100,7 +100,7 @@ class DownloadStatsWindow(wx.Frame):
         # At the end of __init__:
         if hasattr(self, 'canvas'):
             self.canvas.SetSize((950, 610))  # Fixed size that fits well
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
     def on_strength_changed(self, event):
         self.geographic_pull_strength = self.strength_spin.GetValue()
@@ -115,7 +115,7 @@ class DownloadStatsWindow(wx.Frame):
         self.ax.set_xlim(0, 1)
         self.ax.set_ylim(0, 1)
         self.ax.axis('off')
-        self.canvas.draw()
+        self.canvas.draw_idle()
         self.figure.subplots_adjust(top=0.99, bottom=0.01)
 
     def get_sourceforge_data(self, start_date, end_date):
@@ -512,7 +512,7 @@ class DownloadStatsWindow(wx.Frame):
 
         self.ax.set_xlabel('~Longitude (depends on download and pull)', fontsize=12)
         self.ax.set_ylabel('~Latitude (depends on download and pull)', fontsize=12)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def plot_sept_2024(self, event):
         data = self.get_sourceforge_data("2024-09-01", datetime.now().strftime("%Y-%m-%d"))
@@ -621,7 +621,7 @@ class DownloadStatsWindow(wx.Frame):
             if not downloads_data:
                 self.ax.text(0.5, 0.5, 'No downloaded data available',
                              horizontalalignment='center', verticalalignment='center')
-                self.canvas.draw()
+                self.canvas.draw_idle()
                 return
 
             dates = []
@@ -660,7 +660,7 @@ class DownloadStatsWindow(wx.Frame):
             self.figure.autofmt_xdate()
 
             # Update the canvas
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
         except Exception as e:
             print(f"Error details: {e}")
@@ -669,7 +669,7 @@ class DownloadStatsWindow(wx.Frame):
             self.figure.clear()
             self.ax = self.figure.add_subplot(111)
             self.ax.text(0.5, 0.5, f'Error: {str(e)}', ha='center', va='center')
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
     def plot_daily_line(self, event):
         try:
@@ -689,7 +689,7 @@ class DownloadStatsWindow(wx.Frame):
             if not downloads_data:
                 self.ax.text(0.5, 0.5, 'No downloaded data available',
                              horizontalalignment='center', verticalalignment='center')
-                self.canvas.draw()
+                self.canvas.draw_idle()
                 return
 
             dates = []
@@ -728,7 +728,7 @@ class DownloadStatsWindow(wx.Frame):
             self.figure.autofmt_xdate()
 
             # Update the canvas
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
         except Exception as e:
             print(f"Error details: {e}")
@@ -737,7 +737,7 @@ class DownloadStatsWindow(wx.Frame):
             self.figure.clear()
             self.ax = self.figure.add_subplot(111)
             self.ax.text(0.5, 0.5, f'Error: {str(e)}', ha='center', va='center')
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
     def plot_monthly_line(self, event):
         try:
@@ -755,7 +755,7 @@ class DownloadStatsWindow(wx.Frame):
             if not downloads_data:
                 self.ax.text(0.5, 0.5, 'No downloaded data available',
                              horizontalalignment='center', verticalalignment='center')
-                self.canvas.draw()
+                self.canvas.draw_idle()
                 return
 
             dates = []
@@ -794,7 +794,7 @@ class DownloadStatsWindow(wx.Frame):
             self.figure.autofmt_xdate()
 
             # Update the canvas
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
         except Exception as e:
             print(f"Error details: {e}")
@@ -803,7 +803,7 @@ class DownloadStatsWindow(wx.Frame):
             self.figure.clear()
             self.ax = self.figure.add_subplot(111)
             self.ax.text(0.5, 0.5, f'Error: {str(e)}', ha='center', va='center')
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
 
 def show_download_stats_window(parent):

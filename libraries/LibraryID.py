@@ -601,7 +601,7 @@ class PeriodicTableXPS(tk.Tk):
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
             # Refresh the canvas
-            canvas.draw()
+            canvas.draw_idle()
 
         # Bind the update function to the combobox selection
         resolution_combo.bind("<<ComboboxSelected>>", update_plot)

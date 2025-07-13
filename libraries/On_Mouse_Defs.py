@@ -163,7 +163,7 @@ class MouseEventHandler:
                     self.window.peak_manipulation.deselect_all_peaks()
 
             self.window.show_hide_vlines()
-            self.window.canvas.draw()
+            self.window.canvas.draw_idle()
 
     def on_click(self, event):
         if event.inaxes:
@@ -415,7 +415,7 @@ class MouseEventHandler:
                     self.window.peak_manipulation.deselect_all_peaks()
 
             self.window.show_hide_vlines()
-            self.window.canvas.draw()
+            self.window.canvas.draw_idle()
 
     def on_mouse_wheel(self, event):
         self.window.shift_key_pressed = False

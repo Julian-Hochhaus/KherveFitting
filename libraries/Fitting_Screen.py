@@ -1663,7 +1663,7 @@ class TougaardFitWindow(wx.Frame):
         self.ax.legend()
         self.ax.set_xlim(max(self.x_values), min(self.x_values))
         self.ax.set_ylim(self.y_min, self.y_max)  # Use stored y_max
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def plot_initial_data(self):
         self.ax.clear()
@@ -1687,14 +1687,14 @@ class TougaardFitWindow(wx.Frame):
         self.vline_min = self.ax.axvline(x=min_e, color='red', linestyle='--', alpha=0.5)
         self.vline_max = self.ax.axvline(x=max_e, color='red', linestyle='--', alpha=0.5)
 
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_range_change(self, event):
         if self.vline_min is not None:
             self.vline_min.set_xdata([self.min_range.GetValue(), self.min_range.GetValue()])
         if self.vline_max is not None:
             self.vline_max.set_xdata([self.max_range.GetValue(), self.max_range.GetValue()])
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_copy_values(self, event):
         for i, tougaard in enumerate(self.tougaard_params):

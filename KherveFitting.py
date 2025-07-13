@@ -675,11 +675,11 @@ class MyFrame(wx.Frame):
         self.splitter.UpdateSize()
         self.right_frame.Layout()
         self.splitter.Refresh()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_splitter_changed(self, event):
         self.right_frame.Layout()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_window_resize(self, event):
         event.Skip()
@@ -2662,7 +2662,7 @@ class MyFrame(wx.Frame):
         if event.inaxes:
             text = self.ax.text(event.xdata, event.ydata, "Text")
             draggable_text = DraggableText(text)
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
     def open_labels_window(self, event):
         from libraries.Labels_Screen import LabelWindow
@@ -2863,6 +2863,6 @@ if __name__ == '__main__':
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')  # or 'tottime'
     stats.print_stats(30)  # print top 30 slowest functions
-    stats.print_stats("load_library_data")
+    stats.print_stats("plot_initial_logo")
 
     sys.exit(0)

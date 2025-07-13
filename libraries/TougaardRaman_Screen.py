@@ -342,7 +342,7 @@ class TougaardRamanFitWindow(wx.Frame):
         # Plot vertical lines
         self.plot_vlines()
 
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def get_exclusion_zones(self):
         zones = []
@@ -516,7 +516,7 @@ class TougaardRamanFitWindow(wx.Frame):
         self.ax.set_ylim(self.y_min, self.y_max)
         self.ax.set_xlim(min(x), max(x))
 
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_num_zones_change(self, event):
         num = self.num_zones.GetValue()

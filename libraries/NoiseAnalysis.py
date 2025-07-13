@@ -76,7 +76,7 @@ class NoiseAnalysisWindow2(wx.Frame):
         self.ax3.tick_params(axis='both', which='major', labelsize=6)
 
         self.figure.tight_layout(pad=1.0, w_pad=1.0, h_pad=1.0)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
 
     def on_clear_noise(self, event):
@@ -84,7 +84,7 @@ class NoiseAnalysisWindow2(wx.Frame):
         # Clear the plots
         for ax in [self.ax1, self.ax2, self.ax3]:
             ax.clear()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_close(self, event):
         self.parent.noise_window_closed()
@@ -174,7 +174,7 @@ class NoiseAnalysisWindow(wx.Frame):
         self.ax3.tick_params(axis='both', which='major', labelsize=6)
 
         self.figure.tight_layout(pad=1.0, w_pad=1.0, h_pad=1.0)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def update_plots(self, x_values, y_values, linear_fit, noise_subtracted, std_value):
         """Update the plots with new data."""
@@ -214,7 +214,7 @@ class NoiseAnalysisWindow(wx.Frame):
             self.ax3.set_ylabel('Frequency')
 
             self.figure.tight_layout(pad=1.0, w_pad=1.0, h_pad=1.0)
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
         finally:
             # Reset to original rcParams
@@ -271,7 +271,7 @@ class NoiseAnalysisWindow(wx.Frame):
                                            verticalalignment='top',
                                            horizontalalignment='center')
 
-                window.canvas.draw()
+                window.canvas.draw_idle()
 
                 # Return the data for the NoiseAnalysisWindow
                 return x_values_filtered, y_values_filtered, linear_fit, noise_subtracted, std_value
@@ -289,7 +289,7 @@ class NoiseAnalysisWindow(wx.Frame):
             window.noise_inset_ax.clear()
             window.noise_inset_ax.remove()
             window.noise_inset_ax = None
-            window.canvas.draw()
+            window.canvas.draw_idle()
 
     def on_clear_noise(self, event):
         """Handle the Clear Noise button click."""
@@ -297,7 +297,7 @@ class NoiseAnalysisWindow(wx.Frame):
         # Clear the plots
         for ax in [self.ax1, self.ax2, self.ax3]:
             ax.clear()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def on_close(self, event):
         """Handle the window close event."""

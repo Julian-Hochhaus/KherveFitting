@@ -206,7 +206,7 @@ class PlotManager:
         self.ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
 
         # Draw the canvas
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def apply_text_settings(self, window):
         # Apply font settings
@@ -688,7 +688,7 @@ class PlotManager:
                     'Bkg Y': window.y_values.tolist()
                 }
 
-            self.canvas.draw()  # Update the plot
+            self.canvas.draw_idle()  # Update the plot
 
         except Exception as e:
             wx.MessageBox(str(e), "Error", wx.OK | wx.ICON_ERROR)
@@ -2011,7 +2011,7 @@ class PlotManager:
                 self.update_legend(window)
 
             self.ax.legend(loc='upper left', frameon=True, fancybox=True, framealpha=0.1, edgecolor='gray')
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
         except Exception as e:
             print("Error in plot_background:", str(e))

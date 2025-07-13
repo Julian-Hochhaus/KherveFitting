@@ -105,7 +105,7 @@ def remove_peak(window):
 
 def clear_plot(window):
     window.ax.clear()
-    window.canvas.draw()
+    window.canvas.draw_idle()
 
     # Reinitialize the background to raw data
     window.background = None
