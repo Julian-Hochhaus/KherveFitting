@@ -1,6 +1,7 @@
 # libraries/grid_operations.py
 
 import wx
+import wx.grid  # Add this line
 
 def populate_results_grid(window):
     # Get current sheet name and extract row number
@@ -205,7 +206,7 @@ def handle_rsf_change(window, row):
         window.update_atomic_percentages()
 
         # Save state
-        from libraries.Save import save_state
+        from libraries.FileMenu.Save import save_state
         save_state(window)
 
     except ValueError:
@@ -240,7 +241,7 @@ def handle_txfn_change(window, row):
         window.update_atomic_percentages()
 
         # Save state
-        from libraries.Save import save_state
+        from libraries.FileMenu.Save import save_state
         save_state(window)
 
     except ValueError:
@@ -268,7 +269,7 @@ def handle_label_change_OLD(window, row):
         window.Data[results_table_key]['Peak'][peak_key]['Name'] = new_label
 
     # Save state
-    from libraries.Save import save_state
+    from libraries.FileMenu.Save import save_state
     save_state(window)
 
 
@@ -303,7 +304,7 @@ def handle_label_change(window, row):
     window.update_atomic_percentages()
 
     # Save state
-    from libraries.Save import save_state
+    from libraries.FileMenu.Save import save_state
     save_state(window)
 
 class CustomCheckboxRenderer(wx.grid.GridCellRenderer):

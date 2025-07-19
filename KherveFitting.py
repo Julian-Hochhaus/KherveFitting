@@ -5,6 +5,7 @@
 import multiprocessing
 import os
 import psutil
+from libraries.Grid_Operations import on_results_grid_cell_changed
 
 os.environ['OMP_NUM_THREADS'] = str(multiprocessing.cpu_count())
 os.environ['MKL_NUM_THREADS'] = str(multiprocessing.cpu_count())
@@ -20,47 +21,45 @@ import wx.grid
 import wx.adv
 import sys
 import platform
-import re
 
 from matplotlib.ticker import ScalarFormatter, AutoMinorLocator
 matplotlib.use('WXAgg')  # Use WXAgg backend for wxPython compatibility
-from libraries.Fitting_Screen import *
-from libraries.AreaFit_Screen import *
-from libraries.Save import *
-from libraries.NoiseAnalysis import NoiseAnalysisWindow
+from libraries.ToolsMenu.Fitting_Screen import *
+from libraries.ToolsMenu.AreaFit_Screen import *
+from libraries.FileMenu.Save import *
+from libraries.ToolsMenu.NoiseAnalysis import NoiseAnalysisWindow
 from libraries.ConfigFile import *
-from libraries.Export import export_results
+from libraries.FileMenu.Export import export_results
 from libraries.PlotConfig import PlotConfig
 from libraries.Utilities import check_first_time_use, DraggableText
 from libraries.Plot_Operations import PlotManager
 from libraries.Peak_Functions import PeakFunctions
+from libraries.FileMenu.Open import load_library_data
+
 
 # from libraries.Peak_Functions import AtomicConcentrations
 # from libraries.Peak_Functions import gauss_lorentz, S_gauss_lorentz
 
-from Functions import toggle_Col_1, update_sheet_names, rename_sheet, on_sheet_selected_wrapper
-from libraries.PreferenceWindow import PreferenceWindow
+from Functions import update_sheet_names, rename_sheet, on_sheet_selected_wrapper
+from libraries.EditMenu.PreferenceWindow import PreferenceWindow
 
 # from libraries.Sheet_Operations import on_sheet_selected
 
-from libraries.Sheet_Operations import CheckboxRenderer, on_sheet_selected
 from libraries.SplashScreen import show_splash
-from libraries.Save import save_state, undo, redo
+from libraries.FileMenu.Save import save_state, undo, redo
 
 # from libraries.Open import ExcelDropTarget
 # from libraries.Utilities import copy_cell, paste_cell
 
-from Functions import on_save, on_exit
-from libraries.Open import load_recent_files_from_config, open_avg_file
-from libraries.survey import PeriodicTableWindow
+from libraries.FileMenu.Open import load_recent_files_from_config
+from libraries.ToolsMenu.survey import PeriodicTableWindow
 from libraries.Widgets_Toolbars import create_widgets, create_menu
-from libraries.Widgets_Toolbars import create_statusbar, update_statusbar
-from libraries.Open import open_xlsx_file
+from libraries.Widgets_Toolbars import create_statusbar
 
 # from libraries.Export import export_word_report
 
-from libraries.Peak_Functions import OtherCalc, AtomicConcentrations
-from libraries.Dpara_Screen import DParameterWindow
+from libraries.Peak_Functions import AtomicConcentrations
+from libraries.ToolsMenu.Dpara_Screen import DParameterWindow
 from libraries.Update import UpdateChecker
 
 from libraries.PeakFittingGrid import PeakFittingGrid
@@ -68,10 +67,9 @@ from libraries.PeakManipulation import PeakManipulation
 from libraries.On_Key_Defs import setup_key_handlers
 from libraries.On_Mouse_Defs import setup_mouse_handlers
 
-from libraries.QuickSettings import QuickSettings
+from libraries.EditMenu.QuickSettings import QuickSettings
 
-from libraries.Area_Calculation import extract_element_symbol, ATOMIC_MASSES, calculate_weight_percentages
-
+from libraries.Area_Calculation import ATOMIC_MASSES
 
 
 class MyFrame(wx.Frame):
@@ -368,7 +366,7 @@ class MyFrame(wx.Frame):
 
         # Add this line after creating window.results_grid
         self.results_grid.Bind(wx.grid.EVT_GRID_CELL_CHANGED,
-                                 lambda event: on_results_grid_cell_changed(window, event))
+                                 lambda event: on_results_grid_cell_changed(self, event))
 
         # Start Backup timer
         self.setup_backup_timer()
@@ -424,7 +422,7 @@ class MyFrame(wx.Frame):
             clipboard_file = os.path.join(tempfile.gettempdir(), 'khervefitting_peak_clipboard.json')
             paste_item.Enable(os.path.exists(clipboard_file))
 
-            from libraries.Save import copy_peak_parameters, paste_peak_parameters
+            from libraries.FileMenu.Save import copy_peak_parameters, paste_peak_parameters
             self.Bind(wx.EVT_MENU, lambda evt: copy_peak_parameters(self, peak_index), copy_item)
             self.Bind(wx.EVT_MENU, lambda evt: paste_peak_parameters(self, peak_index), paste_item)
 
@@ -643,7 +641,7 @@ class MyFrame(wx.Frame):
             toolbar_panel.Layout()
 
             # Rebind events
-            from libraries.Open import open_xlsx_file
+            from libraries.FileMenu.Open import open_xlsx_file
             from Functions import on_save, refresh_sheets, save_all_sheets_with_plots
             from libraries.Sheet_Operations import on_sheet_selected
             from libraries.Utilities import on_delete_sheet, copy_sheet, JoinSheetsWindow
@@ -2161,7 +2159,7 @@ class MyFrame(wx.Frame):
                 # Refresh and update
                 self.results_grid.ForceRefresh()
                 self.update_atomic_percentages()
-                from libraries.Save import save_state
+                from libraries.FileMenu.Save import save_state
                 save_state(self)
             else:
                 event.Skip()
@@ -2526,8 +2524,7 @@ class MyFrame(wx.Frame):
         self.d_param_window.Raise()
 
     # Add to imports section
-    from libraries.On_BE_Corrections_Defs import on_be_correction_change, on_auto_be, apply_be_correction, \
-        calculate_c1s_correction
+    from libraries.On_BE_Corrections_Defs import on_be_correction_change, on_auto_be
 
     # Remove the existing function definitions and replace with:
     def on_be_correction_change(self, event):
@@ -2557,7 +2554,7 @@ class MyFrame(wx.Frame):
         print(f"Peak fill toggled in main window. New state: {new_state}")  # Debugging line
 
     def on_mini_help(self, event):
-        from libraries.Help import show_quick_help
+        from libraries.HelpMenu.Help import show_quick_help
         show_quick_help(self)
 
     def on_undo(self, event):
@@ -2665,7 +2662,7 @@ class MyFrame(wx.Frame):
             self.canvas.draw_idle()
 
     def open_labels_window(self, event):
-        from libraries.Labels_Screen import LabelWindow
+        from libraries.ViewMenu.Labels_Screen import LabelWindow
         if not hasattr(self, 'labels_window') or not self.labels_window:
             self.labels_window = LabelWindow(self)
         self.labels_window.Show()
@@ -2679,7 +2676,7 @@ class MyFrame(wx.Frame):
 
     def on_open_file_manager(self, event):
         """Open the file manager window"""
-        from libraries.FileManager import FileManagerWindow
+        from libraries.ViewMenu.FileManager import FileManagerWindow
         if not hasattr(self, 'file_manager') or not self.file_manager:
             self.file_manager = FileManagerWindow(self)
         self.file_manager.Show()
@@ -2745,7 +2742,7 @@ class MyFrame(wx.Frame):
                     self.clear_and_replot()
 
                     # Save state for undo functionality
-                    from libraries.Save import save_state
+                    from libraries.FileMenu.Save import save_state
                     save_state(self)
 
                     self.after_checkbox_update()
@@ -2770,7 +2767,7 @@ class MyFrame(wx.Frame):
         self.canvas.draw_idle()
 
         # Save state
-        from libraries.Save import save_state
+        from libraries.FileMenu.Save import save_state
         save_state(self)
 
     def try_float(self, value, default=0.0):
@@ -2781,12 +2778,12 @@ class MyFrame(wx.Frame):
 
     def open_dream_nist_OLD(self):
         """Open the Dream NIST periodic table window"""
-        from libraries.LibraryID import PeriodicTableXPS
+        from libraries.HelpMenu.LibraryID import PeriodicTableXPS
         nist_window = PeriodicTableXPS()
         nist_window.mainloop()
 
     def open_kherve_db(self, kherveDB_wxpython=None):
-        from libraries.kherveDB_wxpython import PeriodicTableXPS
+        from libraries.HelpMenu.kherveDB_wxpython import PeriodicTableXPS
         kherve_frame = PeriodicTableXPS()
         kherve_frame.Show()
 

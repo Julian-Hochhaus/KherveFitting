@@ -6,39 +6,36 @@ import webbrowser
 import subprocess
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
-from matplotlib.backends.backend_wxagg import NavigationToolbar2WxAgg as NavigationToolbar
 from libraries.Sheet_Operations import CheckboxRenderer, on_sheet_selected
-from libraries.Open import ExcelDropTarget, open_xlsx_file, open_avg_file, import_mrs_file, import_multiple_mrs_files, \
-    open_vg_microtech_file_dialog
+from libraries.FileMenu.Open import ExcelDropTarget, open_xlsx_file, import_multiple_mrs_files, open_vg_microtech_file_dialog
 from libraries.Plot_Operations import PlotManager
-from Functions import toggle_Col_1
-from libraries.Save import update_undo_redo_state
-from libraries.Save import save_state, undo, redo
-from libraries.Save import save_peaks_library, load_peaks_library
-from libraries.Save import on_save_as, save_plot_only_to_excel
-from libraries.Save import export_sheet_to_txt, export_sheet_to_csv, export_sheet_to_dat
-from libraries.Open import open_vg_microtech_file, import_multiple_vg_microtech_files
-from libraries.Open import open_vamas_file_dialog, open_kal_file_dialog, import_mrs_file, open_spe_file_dialog, open_file_location
-from libraries.Open import import_raman_txt_file, import_multiple_raman_files, import_xps_asc_file, import_multiple_xps_asc_files
-from libraries.Open import import_xps_csv_file, import_multiple_xps_csv_files
-from libraries.Export import export_word_report
-from libraries.Utilities import CropWindow, PlotModWindow, on_delete_sheet, copy_sheet, JoinSheetsWindow
-from libraries.MarketResearch import check_registration_needed, launch_registration_form
-from libraries.Help import show_libraries_used, show_version_log, report_bug
-from Functions import (import_avantage_file, on_save, save_all_sheets_with_plots, save_results_table, open_avg_file,
-                       import_multiple_avg_files, create_plot_script_from_excel, on_save_plot, \
-    on_save_plot_pdf, on_save_plot_svg, on_exit, undo, redo, toggle_plot, show_shortcuts, show_mini_game, on_about)
+from libraries.FileMenu.Save import update_undo_redo_state
+from libraries.FileMenu.Save import save_state
+from libraries.FileMenu.Save import save_peaks_library, load_peaks_library
+from libraries.FileMenu.Save import on_save_as, save_plot_only_to_excel
+from libraries.FileMenu.Save import export_sheet_to_txt, export_sheet_to_csv, export_sheet_to_dat
+from libraries.FileMenu.Open import import_multiple_vg_microtech_files
+from libraries.FileMenu.Open import open_vamas_file_dialog, open_kal_file_dialog, import_mrs_file, open_spe_file_dialog, open_file_location
+from libraries.FileMenu.Open import import_raman_txt_file, import_multiple_raman_files, import_xps_asc_file, import_multiple_xps_asc_files
+from libraries.FileMenu.Open import import_xps_csv_file, import_multiple_xps_csv_files
+from libraries.FileMenu.Export import export_word_report
+from libraries.Utilities import CropWindow, on_delete_sheet, copy_sheet, JoinSheetsWindow
+from libraries.ToolsMenu.PlotModWindow import PlotModWindow
+from libraries.MarketResearch import launch_registration_form
+from libraries.HelpMenu.Help import report_bug
+from Functions import (on_save_plot_pdf, on_save_plot_svg, on_exit)
+from libraries.FileMenu.Open import import_avantage_file, open_avg_file, import_multiple_avantage_files, import_multiple_avg_files
+from libraries.FileMenu.Save import save_all_sheets_with_plots, create_plot_script_from_excel, refresh_sheets, undo, redo
+from libraries.HelpMenu.Help import show_shortcuts, show_mini_game, on_about
 from libraries.Utilities import add_draggable_text
-from Functions import refresh_sheets, on_sheet_selected_wrapper, toggle_plot, on_save, on_save_plot, on_save_all_sheets, toggle_Col_1, undo, redo
-from libraries.LibraryID import PeriodicTableXPS
+from Functions import on_sheet_selected_wrapper, toggle_plot, on_save, on_save_plot, on_save_all_sheets, toggle_Col_1
 
-from libraries.Save import on_backup_main
-from libraries.Save import save_json_only
+from libraries.FileMenu.Save import on_backup_main
+from libraries.FileMenu.Save import save_json_only
 from libraries.Utilities import sort_excel_sheets
-from libraries.DownloadStats import show_download_stats_window
-from libraries.Open import import_multiple_avantage_files
-from libraries.Open import import_multiple_kfitting_files
-from libraries.Save import save_vamas_file_dialog
+from libraries.HelpMenu.DownloadStats import show_download_stats_window
+from libraries.FileMenu.Open import import_multiple_kfitting_files
+from libraries.FileMenu.Save import save_vamas_file_dialog
 
 
 # With conditional imports:
@@ -102,7 +99,7 @@ def show_flappybird_game(window):
                      "Not Available", wx.OK | wx.ICON_INFORMATION)
         return
     try:
-        from libraries.Flappybird import main as flappybird_main
+        from libraries.Games.Flappybird import main as flappybird_main
         flappybird_main()
     except Exception as e:
         print(f"Error launching Flappybird game: {e}")
@@ -701,8 +698,8 @@ def create_menu(window):
     window.Bind(wx.EVT_MENU, lambda event: webbrowser.open(
         "https://srdata.nist.gov/xps"), nist_item)
 
-    dream_nist_item = knowledge_menu.Append(wx.NewId(), "KherveNIST")
-    window.Bind(wx.EVT_MENU, lambda event: window.open_dream_nist(), dream_nist_item)
+    dream_nist_item = knowledge_menu.Append(wx.NewId(), "KherveDB")
+    window.Bind(wx.EVT_MENU, lambda event: window.open_kherve_db(), dream_nist_item)
 
     harwell_item = knowledge_menu.Append(wx.NewId(), "HarwellXPS Guru")
     window.Bind(wx.EVT_MENU, lambda event: webbrowser.open(
@@ -1408,55 +1405,6 @@ def update_statusbar(window, message):
     window.SetStatusText("Working Directory: " + message)
 
 
-# def open_manual2(window):
-#     import os
-#     current_dir = os.path.dirname(os.path.abspath(__file__))
-#     root_dir = os.path.dirname(current_dir)
-#     manual_path = os.path.join(root_dir, "Manual.pdf")
-#     import webbrowser
-#     webbrowser.open(manual_path)
-
-def open_manualOLD1(window):
-    import os
-    import sys
-    import webbrowser
-
-    if getattr(sys, 'frozen', False):
-        # If the application is run as a bundle, get the path of the executable
-        application_path = os.path.dirname(sys.executable)
-    else:
-        # If the application is run as a script, get the path of the script
-        application_path = os.path.dirname(os.path.abspath(__file__))
-
-    manual_path = os.path.join(application_path, "Manual.pdf")
-    webbrowser.open(manual_path)
-
-
-def open_manualOLD2(window):
-    import os
-    import sys
-    import webbrowser
-    import platform
-    import subprocess
-
-    if getattr(sys, 'frozen', False):
-        # If the application is run as a bundle, get the path of the executable
-        application_path = os.path.dirname(sys.executable)
-    else:
-        # If the application is run as a script, get the path of the script
-        application_path = os.path.dirname(os.path.abspath(__file__))
-
-    manual_path = os.path.join(application_path, "Manual.pdf")
-
-    # Use the appropriate method based on the operating system
-    if platform.system() == 'Windows':
-        os.startfile(manual_path)
-    elif platform.system() == 'Darwin':  # macOS
-        subprocess.call(['open', manual_path])
-    else:  # Linux and other Unix-like systems
-        subprocess.call(['xdg-open', manual_path])
-
-
 def open_manual(window):
     import os
     import sys
@@ -1525,7 +1473,7 @@ def show_plot_limits_window(window):
 
 def open_thickogram_window(parent_window):
     """Open the thickogram calculator window"""
-    from libraries.Tools.ThickogramWindow import ThickogramWindow
+    from libraries.ToolsMenu.ThickogramWindow import ThickogramWindow
     thickogram_window = ThickogramWindow(parent_window)
     thickogram_window.Show()
 

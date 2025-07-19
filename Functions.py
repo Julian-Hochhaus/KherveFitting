@@ -6,24 +6,15 @@ import os
 import pandas as pd
 import numpy as np
 import lmfit
-import sys
-from scipy.stats import linregress
 
-from libraries.Save import refresh_sheets, create_plot_script_from_excel
-from libraries.Peak_Functions import PeakFunctions, BackgroundCalculations
-from libraries.Sheet_Operations import on_sheet_selected
-from libraries.Save import save_results_table, save_all_sheets_with_plots
-from libraries.Help import on_about
-from libraries.Help import show_shortcuts, show_mini_game
-from libraries.Save import undo, redo, save_state, update_undo_redo_state
-from libraries.Open import update_recent_files, import_avantage_file, open_avg_file, import_multiple_avg_files
-from libraries.Utilities import load_rsf_data
-from libraries.Grid_Operations import populate_results_grid
+from libraries.Peak_Functions import PeakFunctions
+from libraries.FileMenu.Save import save_state
+
 
 # -------------------------------------------------------------------------------
 
 def save_data_wrapper(window, data):
-    from libraries.Save import save_data
+    from libraries.FileMenu.Save import save_data
     save_data(window, data)
 
 def on_sheet_selected_wrapper(window, event):
@@ -183,39 +174,31 @@ def toggle_plot(window):
         window.plot_manager.plot_data(window)
     window.canvas.draw_idle()
 
-import json
-from libraries.ConfigFile import Init_Measurement_Data, add_core_level_Data
-
-import shutil
-from vamas import Vamas
-from openpyxl import Workbook
-
-
 
 def on_save_plot(window):
-    from libraries.Save import save_plot_as_png
+    from libraries.FileMenu.Save import save_plot_as_png
     save_plot_as_png(window)
 
 
 def on_save_plot_pdf(window):
-    from libraries.Save import save_plot_as_pdf
+    from libraries.FileMenu.Save import save_plot_as_pdf
     save_plot_as_pdf(window)
 
 
 def on_save_plot_svg(window):
-    from libraries.Save import save_plot_as_svg
+    from libraries.FileMenu.Save import save_plot_as_svg
     save_plot_as_svg(window)
 
 
 def on_save(window):
-    from libraries.Save import save_data, save_results_table
+    from libraries.FileMenu.Save import save_data
     data = window.get_data_for_save()
     save_data(window, data)
     # save_results_table(window)  # Add this line to also save results table
 
 
 def on_save_all_sheets(window, event):
-    from libraries.Save import save_all_sheets_with_plots
+    from libraries.FileMenu.Save import save_all_sheets_with_plots
     save_all_sheets_with_plots(window)
 
 def toggle_Col_1(window):
@@ -248,9 +231,6 @@ def calculate_r2(y_true, y_pred):
 def calculate_chi_square(y_true, y_pred):
     """Calculate the chi-square value"""
     return np.sum((y_true - y_pred) ** 2 / y_pred)
-
-
-from matplotlib.ticker import ScalarFormatter
 
 
 def fit_peaks(window, peak_params_grid, evaluate=False):

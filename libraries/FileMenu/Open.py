@@ -1,4 +1,3 @@
-import wx
 import os
 import json
 import openpyxl
@@ -6,9 +5,6 @@ import xlrd
 import wx
 import re
 import sys
-import pandas as pd
-import struct
-from pathlib import Path
 import shutil
 from vamas import Vamas
 from openpyxl import Workbook
@@ -16,10 +12,9 @@ import numpy as np
 from scipy.interpolate import interp1d
 import pandas as pd
 from openpyxl.styles import Alignment
-from yadg.extractors.phi.spe import extract  # NOTE THIS LIBRARY HAS BEEN TRANSFORMED
 
 from libraries.ConfigFile import Init_Measurement_Data, add_core_level_Data
-from libraries.Save import update_undo_redo_state, save_state
+from libraries.FileMenu.Save import update_undo_redo_state, save_state
 from libraries.Sheet_Operations import on_sheet_selected
 from libraries.Grid_Operations import populate_results_grid
 
@@ -30,7 +25,7 @@ class ExcelDropTarget(wx.FileDropTarget):
         self.window = window
 
     def OnDropFiles_OLD(self, x, y, filenames):
-        from libraries.Open import open_xlsx_file, open_vamas_file
+        from libraries.FileMenu.Open import open_xlsx_file, open_vamas_file
         for file in filenames:
             if not any(file.lower().endswith(ext) for ext in ['.xlsx', '.xls', '.vms', '.kal', '.avg', '.spe',
                                                               '.mrs', '.1']):
@@ -83,9 +78,6 @@ class ExcelDropTarget(wx.FileDropTarget):
         return False
 
     def OnDropFiles(self, x, y, filenames):
-        from libraries.Open import (open_xlsx_file, open_vamas_file, open_kal_file,
-                                    open_avg_file_direct, open_spe_file, open_mrs_file,
-                                    open_vg_microtech_file)
 
         # Check all files are valid first
         for file in filenames:
@@ -108,9 +100,9 @@ class ExcelDropTarget(wx.FileDropTarget):
 
     def _process_single_dropped_file(self, file):
         """Process single dropped file using original logic"""
-        from libraries.Open import open_xlsx_file, open_vamas_file, open_kal_file, open_avg_file_direct, open_spe_file, \
+        from libraries.FileMenu.Open import open_xlsx_file, open_vamas_file, open_kal_file, open_avg_file_direct, open_spe_file, \
             open_mrs_file, open_vg_microtech_file
-        from libraries.Open import import_avantage_file_direct, import_avantage_file_direct_xls
+        from libraries.FileMenu.Open import import_avantage_file_direct, import_avantage_file_direct_xls
 
         if file.lower().endswith('.xlsx'):
             try:
@@ -258,7 +250,7 @@ class ExcelDropTarget(wx.FileDropTarget):
             import openpyxl
             import os
             import json
-            from libraries.Open import process_kfitting_file_with_sample_number_with_mapping
+            from libraries.FileMenu.Open import process_kfitting_file_with_sample_number_with_mapping
 
             # Sort files alphabetically
             file_list.sort(key=lambda x: os.path.basename(x))
@@ -388,14 +380,14 @@ class ExcelDropTarget(wx.FileDropTarget):
             combined_json_data['FilePath'] = combined_file_path
 
             # Convert to serializable format and save
-            from libraries.Save import convert_to_serializable_and_round
+            from libraries.FileMenu.Save import convert_to_serializable_and_round
             serializable_data = convert_to_serializable_and_round(combined_json_data)
 
             with open(combined_json_path, 'w') as json_file:
                 json.dump(serializable_data, json_file, indent=2)
 
             # Open the combined file
-            from libraries.Open import open_xlsx_file
+            from libraries.FileMenu.Open import open_xlsx_file
             open_xlsx_file(self.window, combined_file_path)
 
             # Update window.Data with the combined JSON data
@@ -421,7 +413,7 @@ class ExcelDropTarget(wx.FileDropTarget):
     def _import_multiple_avantage_direct(self, file_list):
         """Import multiple Avantage files directly"""
         try:
-            from libraries.Open import import_avantage_file_direct, import_avantage_file_direct_xls
+            from libraries.FileMenu.Open import import_avantage_file_direct, import_avantage_file_direct_xls
 
             processed_count = 0
             for file_path in file_list:
@@ -443,7 +435,7 @@ class ExcelDropTarget(wx.FileDropTarget):
     def _import_multiple_mrs_direct(self, file_list):
         """Import multiple MRS files directly"""
         try:
-            from libraries.Open import open_mrs_file
+            from libraries.FileMenu.Open import open_mrs_file
 
             processed_count = 0
             for file_path in file_list:
@@ -461,7 +453,7 @@ class ExcelDropTarget(wx.FileDropTarget):
     def _import_multiple_avg_direct(self, file_list):
         """Import multiple AVG files directly"""
         try:
-            from libraries.Open import open_avg_file_direct
+            from libraries.FileMenu.Open import open_avg_file_direct
 
             processed_count = 0
             for file_path in file_list:
@@ -479,7 +471,7 @@ class ExcelDropTarget(wx.FileDropTarget):
     def _import_multiple_vg_direct(self, file_list):
         """Import multiple VG-Microtech files directly"""
         try:
-            from libraries.Open import open_vg_microtech_file
+            from libraries.FileMenu.Open import open_vg_microtech_file
 
             processed_count = 0
             for file_path in file_list:
@@ -1099,7 +1091,7 @@ def open_spe_file(window, file_path):
         wb.save(excel_path)
 
         # Open the Excel file
-        from libraries.Open import open_xlsx_file
+        from libraries.FileMenu.Open import open_xlsx_file
         open_xlsx_file(window, excel_path)
         return True
 
@@ -1349,7 +1341,7 @@ def open_mrs_file(window, file_path):
                 wb.save(excel_path)
 
                 # Open the created Excel file
-                from libraries.Open import open_xlsx_file
+                from libraries.FileMenu.Open import open_xlsx_file
                 open_xlsx_file(window, excel_path)
                 return True
             else:
@@ -1503,7 +1495,7 @@ def import_multiple_mrs_files(window):
 
             # Open the combined Excel file
             if processed_count > 0:
-                from libraries.Open import open_xlsx_file
+                from libraries.FileMenu.Open import open_xlsx_file
                 open_xlsx_file(window, excel_path)
                 window.show_popup_message2("Success",
                                            f"Created combined Excel file with {processed_count} sheets from MRS files.")
@@ -1524,7 +1516,6 @@ def import_mrs_file(window):
     import wx
     import os
     import re
-    import numpy as np
     from openpyxl import Workbook
 
     with wx.FileDialog(window, "Open MRS file", wildcard="MRS files (*.mrs)|*.mrs",
@@ -1630,7 +1621,7 @@ def import_mrs_file(window):
                 wb.save(excel_path)
 
                 # Open the created Excel file
-                from libraries.Open import open_xlsx_file
+                from libraries.FileMenu.Open import open_xlsx_file
                 open_xlsx_file(window, excel_path)
             else:
                 window.show_popup_message2("Error", "No valid data found in the MRS file.")
@@ -1929,7 +1920,7 @@ def import_multiple_avantage_files(window):
         window.show_popup_message2("Success", f"Combined {len(avantage_files)} Avantage files into single Excel file.")
 
         # Open the combined file
-        from libraries.Open import open_xlsx_file
+        from libraries.FileMenu.Open import open_xlsx_file
         open_xlsx_file(window, combined_file_path)
 
         # Update SampleNames in window.Data
@@ -1942,7 +1933,7 @@ def import_multiple_avantage_files(window):
 
         # Save the updated JSON file
         json_file_path = os.path.splitext(combined_file_path)[0] + '.json'
-        from libraries.Save import convert_to_serializable_and_round
+        from libraries.FileMenu.Save import convert_to_serializable_and_round
         json_data = convert_to_serializable_and_round(window.Data)
         with open(json_file_path, 'w') as json_file:
             json.dump(json_data, json_file, indent=2)
@@ -1953,7 +1944,6 @@ def import_multiple_avantage_files(window):
 
 def process_avantage_xlsx_with_sample_number(wb, combined_wb, sample_idx):
     """Process xlsx Avantage file and add numbered core levels to combined workbook"""
-    import re
     from openpyxl.utils import get_column_letter  # ADDED
 
     sheets_to_process = []
@@ -2050,7 +2040,6 @@ def process_avantage_xlsx_with_sample_number(wb, combined_wb, sample_idx):
 
 def process_avantage_xls_with_sample_number(wb_xls, combined_wb, sample_idx):
     """Process xls Avantage file and add numbered core levels to combined workbook"""
-    import re
     import openpyxl  # ADDED
     from openpyxl.utils import get_column_letter  # ADDED
 
@@ -2403,7 +2392,7 @@ def open_avg_file(window):
         # Use create_excel_from_avg which we need to modify to normalize sheet names
         excel_file_path = create_excel_from_avg(avg_file_path)
 
-        from libraries.Open import open_xlsx_file
+        from libraries.FileMenu.Open import open_xlsx_file
         open_xlsx_file(window, excel_file_path)
     except Exception as e:
         wx.MessageBox(f"Error processing AVG file: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
@@ -2511,7 +2500,7 @@ def import_multiple_avg_files(window):
             wx.MessageBox(message, "Success", wx.OK | wx.ICON_INFORMATION)
 
             # Open the first Excel file
-            from libraries.Open import open_xlsx_file
+            from libraries.FileMenu.Open import open_xlsx_file
             open_xlsx_file(window, excel_files[0])
         else:
             wx.MessageBox("No AVG files found in the selected folder or subfolders.",
@@ -2769,12 +2758,12 @@ def open_xlsx_file_OLD(window, file_path=None):
         perform_auto_backup(window)
 
         # Refresh Sheet
-        from libraries.Save import refresh_sheets
+        from libraries.FileMenu.Save import refresh_sheets
         refresh_sheets(window, on_sheet_selected)
 
         # Reopen file manager if it was open
         if file_manager_was_open:
-            from libraries.FileManager import FileManagerWindow
+            from libraries.ViewMenu.FileManager import FileManagerWindow
             window.file_manager = FileManagerWindow(window)
             if file_manager_position:
                 window.file_manager.SetPosition(file_manager_position)
@@ -2925,7 +2914,7 @@ def open_xlsx_file_old(window, file_path=None):
 
         # Refresh Sheet
         update_console("Refreshing sheets...")
-        from libraries.Save import refresh_sheets
+        from libraries.FileMenu.Save import refresh_sheets
         refresh_sheets(window, on_sheet_selected, update_console)
 
         update_console("File loaded successfully!")
@@ -2933,7 +2922,7 @@ def open_xlsx_file_old(window, file_path=None):
 
         # Restore file manager
         if file_manager_was_open:
-            from libraries.FileManager import FileManagerWindow
+            from libraries.ViewMenu.FileManager import FileManagerWindow
             window.file_manager = FileManagerWindow(window)
             if file_manager_position:
                 window.file_manager.SetPosition(file_manager_position)
@@ -3545,6 +3534,47 @@ def extract_transmission_reference(block):
         return None
 
 
+def normalize_auger_and_valence_names(sheet_name):
+    """
+    Normalize Auger transition names and valence band variations.
+
+    Examples:
+    - Fe LM2 -> Felmm
+    - C KL1 -> Ckll
+    - V.B. -> VB
+    - V.B -> VB
+    """
+    import re
+
+    # Handle valence band variations first
+    vb_pattern = r'^V\.?B\.?\s*$'
+    if re.match(vb_pattern, sheet_name.strip(), re.IGNORECASE):
+        return "VB"
+
+    # Handle Auger transitions
+    # Pattern: Element symbol + space + Auger notation (letters + numbers)
+    auger_pattern = r'^([A-Z][a-z]?)\s+([A-Z]+\d*)$'
+    match = re.match(auger_pattern, sheet_name.strip())
+
+    if match:
+        element = match.group(1)  # e.g., "Fe", "C"
+        auger_part = match.group(2)  # e.g., "LM2", "KL1"
+
+        # Remove numbers and convert letters to lowercase
+        auger_letters = re.sub(r'\d+', '', auger_part).lower()
+
+        # Duplicate letters based on the original notation
+        # For LM2 -> lm -> lmm (duplicate the last letter)
+        # For KL1 -> kl -> kll (duplicate the last letter)
+        if len(auger_letters) >= 2:
+            # Add extra letter (typically duplicate the last one)
+            auger_letters += auger_letters[-1]
+
+        return f"{element}{auger_letters}"
+
+    return sheet_name
+
+
 def open_vamas_file(window, file_path):
     """
     Open and process a VAMAS file, converting it to an Excel file format.
@@ -3616,11 +3646,18 @@ def open_vamas_file(window, file_path):
 
         # Process each block
         for i, block in enumerate(vamas_data.blocks, start=1):
+            # Skip blocks with 0 scans
+            if block.num_scans_to_compile_block == 0:
+                update_console(f"Skipping block {i}: {block.species_label} - 0 scans")
+                continue
             if block.species_label.lower() == "wide" or block.transition_or_charge_state_label.lower() == "none":
                 raw_sheet_name = block.species_label
             else:
                 raw_sheet_name = f"{block.species_label}{block.transition_or_charge_state_label}"
             raw_sheet_name = raw_sheet_name.replace("/", "_")
+
+            # Apply Auger and valence band normalization
+            raw_sheet_name = normalize_auger_and_valence_names(raw_sheet_name)
 
             sheet_name = normalize_sheet_name(raw_sheet_name)
 
@@ -3995,35 +4032,63 @@ def parse_casa_peak_fitting(block_comment, num_scans=1, photon_energy=1486.67, t
                     # Calculate L/G ratio from sigma and gamma
                     lg_value = 100 * sigma_value / (sigma_value + gamma_value)
                 else:
-                    # Check for single parameter LA(number) format
-                    single_param = re.search(r'LA\((\d+)\)', model_str)
-                    if single_param:
-                        ratio_value = int(single_param.group(1))
+                    # Check for two parameter format: LA(param1, param2)
+                    two_param = re.search(r'LA\(([\d.]+),\s*([\d.]+)\)', model_str)
+                    if two_param:
+                        param1 = float(two_param.group(1))
+                        param2 = float(two_param.group(2))
 
-                        # Mapping for gamma values based on sigma/gamma ratio
-                        gamma_mapping = {
-                            20: 2.7, 30: 2.4, 40: 2.2, 50: 2.0, 60: 1.8,
-                            70: 1.6, 80: 1.4, 90: 1.2, 100: 1.0
-                        }
-
-                        gamma_value = gamma_mapping.get(ratio_value, 2.0)  # Default to 2.0 if not found
-                        sigma_value = gamma_value  # sigma = (sigma/gamma) * gamma
-                        lg_value = ratio_value  # L/G ratio is the number itself
-                        model = "LA (Area, σ/γ, γ)"
+                        # If second parameter > 100, treat as LA*G with sigma=gamma=param1, w_g=param2
+                        if param2 > 100:
+                            sigma_value = param1  # 1.53
+                            gamma_value = param1  # 1.53 (same as sigma)
+                            w_g = param2  # 243
+                            model = "LA*G (Area, σ/γ, γ)"
+                            lg_value = 50  # 50% since sigma = gamma
+                            print(
+                                f"DEBUG: LA(2-param) large second -> LA*G: σ={sigma_value}, γ={gamma_value}, w_g={w_g}")
+                        else:
+                            # Standard two-parameter LA(sigma, gamma)
+                            sigma_value = param1
+                            gamma_value = param2
+                            model = "LA (Area, σ, γ)"
+                            lg_value = 100 * sigma_value / (sigma_value + gamma_value)
+                            print(f"DEBUG: LA(2-param) standard -> LA: σ={sigma_value}, γ={gamma_value}")
                     else:
-                        model = "LA (Area, σ, γ)"
-                        sigma_value = 0.6
-                        gamma_value = 0.4
-                        lg_value = 100 * sigma_value / (sigma_value + gamma_value)
+                        # Check for single parameter LA(number) format
+                        single_param = re.search(r'LA\((\d+)\)', model_str)
+                        if single_param:
+                            ratio_value = int(single_param.group(1))
+
+                            # Mapping for gamma values based on sigma/gamma ratio
+                            gamma_mapping = {
+                                20: 2.8, 30: 2.6, 40: 2.4, 50: 2.3, 60: 1.8,
+                                70: 1.6, 80: 1.4, 90: 1.2, 100: 1.0
+                            }
+
+                            gamma_value = gamma_mapping.get(ratio_value, 2.0)  # Default to 2.0 if not found
+                            sigma_value = gamma_value  # sigma = (sigma/gamma) * gamma
+                            lg_value = ratio_value  # L/G ratio is the number itself
+                            model = "LA (Area, σ/γ, γ)"
+                        else:
+                            model = "LA (Area, σ, γ)"
+                            sigma_value = 0.6
+                            gamma_value = 0.4
+                            lg_value = 100 * sigma_value / (sigma_value + gamma_value)
 
             # Extract parameters with constraints
             area_match = re.search(r'Area\s+([\d.e-]+)\s+([\d.e-]+)\s+([\d.e-]+)\s+(-?\d+)\s+([\d.e-]+)', line)
             fwhm_match = re.search(r'MFWHM\s+([\d.e-]+)\s+([\d.e-]+)\s+([\d.e-]+)\s+(-?\d+)\s+([\d.e-]+)', line)
             pos_match = re.search(r'Position\s+([\d.e-]+)\s+([\d.e-]+)\s+([\d.e-]+)\s+(-?\d+)\s+([\d.e-]+)', line)
 
-            # Calculate area (divide by average transmission only)
-            area_value = float(area_match.group(1)) / avg_transmission if area_match else 1000
-            area_value = round(area_value,2)
+            # Calculate area (divide by transmission AND correction factor like raw data)
+            if collection_time > 0:
+                correction_factor = avg_transmission * num_scans * collection_time
+            else:
+                correction_factor = avg_transmission * num_scans
+
+            area_value = float(area_match.group(1)) / correction_factor if area_match else 1000
+            area_value = round(area_value, 2)
             # Handle area constraints
             if area_match:
                 area_constrained_peak = int(area_match.group(4))
@@ -4603,9 +4668,8 @@ def open_kal_file(window, file_path):
 def import_raman_txt_file(window):
     import wx
     import os
-    import pandas as pd
     import openpyxl
-    from libraries.Open import open_xlsx_file
+    from libraries.FileMenu.Open import open_xlsx_file
 
     with wx.FileDialog(window, "Open Raman text file", wildcard="Text files (*.txt)|*.txt",
                        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
@@ -4679,9 +4743,8 @@ def import_raman_txt_file(window):
 def import_multiple_raman_files(window):
     import wx
     import os
-    import pandas as pd
     import openpyxl
-    from libraries.Open import open_xlsx_file
+    from libraries.FileMenu.Open import open_xlsx_file
 
     with wx.DirDialog(window, "Choose a directory containing Raman text files",
                       style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dirDialog:
@@ -4767,9 +4830,8 @@ def import_multiple_raman_files(window):
 def import_xps_asc_file(window):
     import wx
     import os
-    import pandas as pd
     import openpyxl
-    from libraries.Open import open_xlsx_file
+    from libraries.FileMenu.Open import open_xlsx_file
 
     with wx.FileDialog(window, "Open XPS ASC file", wildcard="ASC files (*.asc)|*.asc",
                        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
@@ -4843,9 +4905,8 @@ def import_xps_asc_file(window):
 def import_multiple_xps_asc_files(window):
     import wx
     import os
-    import pandas as pd
     import openpyxl
-    from libraries.Open import open_xlsx_file
+    from libraries.FileMenu.Open import open_xlsx_file
 
     with wx.DirDialog(window, "Choose a directory containing XPS ASC files",
                       style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dirDialog:
@@ -4933,7 +4994,7 @@ def import_xps_csv_file(window):
     import os
     import pandas as pd
     import openpyxl
-    from libraries.Open import open_xlsx_file
+    from libraries.FileMenu.Open import open_xlsx_file
 
     with wx.FileDialog(window, "Open XPS CSV file", wildcard="CSV files (*.csv)|*.csv",
                        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
@@ -5011,7 +5072,7 @@ def import_multiple_xps_csv_files(window):
     import os
     import pandas as pd
     import openpyxl
-    from libraries.Open import open_xlsx_file
+    from libraries.FileMenu.Open import open_xlsx_file
 
     with wx.DirDialog(window, "Choose a directory containing XPS CSV files",
                       style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dirDialog:
@@ -5172,7 +5233,7 @@ def open_vg_microtech_file(window, file_path):
         wb.remove(wb.active)  # Remove default sheet
 
         # Create sheet with normalized measurement type as name
-        from libraries.Open import normalize_sheet_name
+        from libraries.FileMenu.Open import normalize_sheet_name
         sheet_name = normalize_sheet_name(measurement_type)
         ws = wb.create_sheet(title=sheet_name)
 
@@ -5221,7 +5282,7 @@ def open_vg_microtech_file(window, file_path):
         wb.save(excel_path)
 
         # Open the created Excel file
-        from libraries.Open import open_xlsx_file
+        from libraries.FileMenu.Open import open_xlsx_file
         open_xlsx_file(window, excel_path)
         return True
 
@@ -5254,7 +5315,7 @@ def import_multiple_vg_microtech_files(window):
     import os
     import numpy as np
     import openpyxl
-    from libraries.Open import normalize_sheet_name, open_xlsx_file
+    from libraries.FileMenu.Open import normalize_sheet_name, open_xlsx_file
 
     with wx.DirDialog(window, "Choose a directory containing VG-Microtech .1 files",
                       style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dirDialog:
@@ -5503,7 +5564,7 @@ def import_multiple_kfitting_files(window):
                                    f"Combined {len(excel_files)} KherveFitting files into single Excel file.")
 
         # Open the combined file
-        from libraries.Open import open_xlsx_file
+        from libraries.FileMenu.Open import open_xlsx_file
         open_xlsx_file(window, combined_file_path)
 
         # Update SampleNames in window.Data
@@ -5516,7 +5577,7 @@ def import_multiple_kfitting_files(window):
 
         # Save the updated JSON file
         json_file_path = os.path.splitext(combined_file_path)[0] + '.json'
-        from libraries.Save import convert_to_serializable_and_round
+        from libraries.FileMenu.Save import convert_to_serializable_and_round
         json_data = convert_to_serializable_and_round(window.Data)
         with open(json_file_path, 'w') as json_file:
             json.dump(json_data, json_file, indent=2)
