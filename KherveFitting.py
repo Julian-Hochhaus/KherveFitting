@@ -3822,17 +3822,17 @@ def main():
 
 
 if __name__ == '__main__':
-    import cProfile
-    import pstats
-
-    profiler = cProfile.Profile()
-    profiler.enable()
-
-    main()
-
-    profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats('cumtime')  # or 'tottime'
-    stats.print_stats(30)  # print top 30 slowest functions
-    stats.print_stats("plot_initial_logo")
-
-    sys.exit(0)
+    timing=False
+    if timing:
+        import cProfile
+        import pstats
+        profiler = cProfile.Profile()
+        profiler.enable()
+        main()
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumtime')  # or 'tottime'
+        stats.print_stats(30)
+        sys.exit(0)
+    else:
+        main()
+        sys.exit(0)
