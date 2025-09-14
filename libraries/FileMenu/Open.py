@@ -3068,7 +3068,7 @@ def open_xlsx_file(window, file_path=None): #trying to optimize speed
 
         # Refresh Sheet
         update_console("Refreshing sheets...")
-        from libraries.Save import refresh_sheets
+        from libraries.FileMenu.Save import refresh_sheets
         refresh_sheets(window, on_sheet_selected, update_console)
 
         update_console("File loaded successfully!")
@@ -3076,7 +3076,7 @@ def open_xlsx_file(window, file_path=None): #trying to optimize speed
 
         # Restore file manager
         if file_manager_was_open:
-            from libraries.FileManager import FileManagerWindow
+            from libraries.ViewMenu.FileManager import FileManagerWindow
             window.file_manager = FileManagerWindow(window)
             if file_manager_position:
                 window.file_manager.SetPosition(file_manager_position)
