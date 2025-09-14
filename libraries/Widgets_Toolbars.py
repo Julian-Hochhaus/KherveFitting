@@ -36,7 +36,8 @@ from libraries.Utilities import sort_excel_sheets
 from libraries.HelpMenu.DownloadStats import show_download_stats_window
 from libraries.FileMenu.Open import import_multiple_kfitting_files
 from libraries.FileMenu.Save import save_vamas_file_dialog
-
+from libraries.ToolsMenu.VB_measurements import VB_measurements
+from libraries.ToolsMenu.PlotModWindow import PlotModWindow
 
 # With conditional imports:
 import platform
@@ -357,8 +358,19 @@ def create_peak_params_grid(window, parent):
 
 
 def create_results_grid(window, parent):
-    results_frame_box = wx.StaticBox(parent, label="Results")
+    # Get current row number for dynamic label
+    current_sheet = getattr(window, 'current_sheet', 'Sheet0')
+    row_number = 0
+    import re
+    match = re.search(r'(\d+)$', current_sheet)
+    if match:
+        row_number = int(match.group(1))
+
+    results_frame_box = wx.StaticBox(parent, label=f"Results [Row {row_number}]")
     results_sizer = wx.StaticBoxSizer(results_frame_box, wx.VERTICAL)
+
+    # Store reference to the frame box for updating the label
+    window.results_frame_box = results_frame_box
 
     window.results_frame = wx.Panel(results_frame_box)
     results_sizer_inner = wx.BoxSizer(wx.VERTICAL)
@@ -410,6 +422,9 @@ def bind_events_widgets(window):
     window.results_grid.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, window.on_checkbox_update)
     window.canvas.mpl_connect('button_release_event', window.on_plot_mouse_release)
     window.peak_params_grid.Bind(wx.EVT_LEFT_UP, window.on_peak_params_mouse_release)
+
+    # Add right-click context menus
+    window.results_grid.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, window.on_results_grid_right_click)
 
 
 
@@ -463,9 +478,9 @@ def create_menu(window):
     save_plot_only_item = save_menu.Append(wx.NewId(), "Save Plot Only in Excel")
     window.Bind(wx.EVT_MENU, lambda event: save_plot_only_to_excel(window), save_plot_only_item)
 
-    file_menu.AppendSubMenu(save_menu, "Save")
+    file_menu.AppendSubMenu(save_menu, "Save\tCtrl+S")
 
-    save_as_item = file_menu.Append(wx.ID_SAVEAS, "Save As...\tCtrl+Shift+S")
+    save_as_item = file_menu.Append(wx.ID_SAVEAS, "Save As...")
     window.Bind(wx.EVT_MENU, lambda event: on_save_as(window), save_as_item)
 
     # Import submenu items
@@ -558,15 +573,27 @@ def create_menu(window):
     word_report_item = export_menu.Append(wx.NewId(), "Create Report (.docx)")
     window.Bind(wx.EVT_MENU, lambda event: export_word_report(window), word_report_item)
 
+    folder_header = file_menu.Append(wx.ID_ANY, "▬▬▬▬▬▬▬▬▬▬▬▬▬")
+    folder_header.Enable(False)  # Make it non-clickable
+
     open_location_item = file_menu.Append(wx.NewId(), "Open File Location")
     window.Bind(wx.EVT_MENU, lambda event: open_file_location(window), open_location_item)
+
+    # Open Examples submenu
+    open_examples_menu = create_examples_menu(window)
+    file_menu.AppendSubMenu(open_examples_menu, "Open Examples")
+
+    import_header = file_menu.Append(wx.ID_ANY, "▬▬▬▬▬▬▬▬▬▬▬▬▬")
+    import_header.Enable(False)  # Make it non-clickable
 
     # Append submenus to file menu
     file_menu.AppendSubMenu(import_menu, "Import")
     file_menu.AppendSubMenu(export_menu, "Export")
 
     # Exit item
-    file_menu.AppendSeparator()
+    # file_menu.AppendSeparator()
+    exit_header = file_menu.Append(wx.ID_ANY, "▬▬▬▬▬▬▬▬▬▬▬▬▬")
+    exit_header.Enable(False)  # Make it non-clickable
     exit_item = file_menu.Append(wx.ID_EXIT, "Exit\tCtrl+Q")
     window.Bind(wx.EVT_MENU, lambda event: on_exit(window, event), exit_item)
 
@@ -575,14 +602,41 @@ def create_menu(window):
     redo_item = edit_menu.Append(wx.ID_REDO, "Redo\tCtrl+Y")
     window.Bind(wx.EVT_MENU, lambda event: undo(window), undo_item)
     window.Bind(wx.EVT_MENU, lambda event: redo(window), redo_item)
-    edit_menu.AppendSeparator()
 
+    # Add a text separator for Results operations
+    # edit_menu.AppendSeparator()
+    results_header = edit_menu.Append(wx.ID_ANY, "▬▬▬ Results Grid ▬▬▬▬")
+    results_header.Enable(False)  # Make it non-clickable
+
+    # Add export and remove functions to Edit menu
+    export_results_item = edit_menu.Append(wx.NewId(), "Export Fitting Grid")
+    from libraries.FileMenu.Export import export_results
+    window.Bind(wx.EVT_MENU, lambda event: export_results(window), export_results_item)
+
+    remove_all_item = edit_menu.Append(wx.NewId(), "Remove All Lines")
+    window.Bind(wx.EVT_MENU, lambda event: on_clear_all_results(window, event), remove_all_item)
+
+    remove_first_item = edit_menu.Append(wx.NewId(), "Remove First Line")
+    window.Bind(wx.EVT_MENU, lambda event: on_delete_first(window, event), remove_first_item)
+
+    remove_last_item = edit_menu.Append(wx.NewId(), "Remove Last Line")
+    window.Bind(wx.EVT_MENU, lambda event: on_delete_last(window, event), remove_last_item)
+
+    # edit_menu.AppendSeparator()
+    pref_header = edit_menu.Append(wx.ID_ANY, "▬▬▬▬▬▬▬▬▬▬▬▬▬")
+    pref_header.Enable(False)  # Make it non-clickable
     preferences_item = edit_menu.Append(wx.ID_PREFERENCES, "Preferences")
     window.Bind(wx.EVT_MENU, window.on_preferences, preferences_item)
 
     # View menu items
     sample_manager_item = view_menu.Append(wx.NewId(), "Sample Manager")
     window.Bind(wx.EVT_MENU, window.on_open_file_manager, sample_manager_item)
+
+    labels_manager_item = view_menu.Append(wx.NewId(), "Labels Manager")
+    window.Bind(wx.EVT_MENU, window.open_labels_window, labels_manager_item)
+
+    labels_header = view_menu.Append(wx.ID_ANY, "▬▬▬ Toggles ▬▬▬▬▬▬")
+    labels_header.Enable(False)  # Make it non-clickable
 
     ToggleFitting_item = view_menu.Append(wx.NewId(), "Toggle Peak Fitting")
     window.Bind(wx.EVT_MENU, lambda event: toggle_plot(window), ToggleFitting_item)
@@ -596,26 +650,54 @@ def create_menu(window):
     ToggleRes_item = view_menu.Append(wx.NewId(), "Toggle Residuals")
     window.Bind(wx.EVT_MENU, lambda event: window.plot_manager.toggle_residuals(), ToggleRes_item)
 
-    toggle_energy_item = view_menu.AppendCheckItem(wx.NewId(), "Show Kinetic Energy\tCtrl+B")
+    kin_header = view_menu.Append(wx.ID_ANY, "▬▬▬ Beta ▬▬▬▬▬▬▬▬")
+    kin_header.Enable(False)  # Make it non-clickable
+
+    toggle_energy_item = view_menu.AppendCheckItem(wx.NewId(), "Show Kinetic Energy (Beta)\tCtrl+B")
     window.Bind(wx.EVT_MENU, lambda event: window.toggle_energy_scale(), toggle_energy_item)
     window.toggle_energy_item = toggle_energy_item
 
     # Tools menu items
-    Area_item = tools_menu.Append(wx.NewId(), "Calculate Area Under Curve\tCtrl+A")
+    Area_item = tools_menu.Append(wx.NewId(), "Calculate Area Under Curve")
     window.Bind(wx.EVT_MENU, lambda event: window.on_open_background_window(), Area_item)
 
     Fitting_item = tools_menu.Append(wx.NewId(), "Create Peak Model\tCtrl+P")
     window.Bind(wx.EVT_MENU, lambda event: window.on_open_fitting_window(), Fitting_item)
 
+    other_header = tools_menu.Append(wx.ID_ANY, "▬▬▬ Others ▬▬▬▬▬▬▬▬")
+    other_header.Enable(False)  # Make it non-clickable
+
     Dparam_item = tools_menu.Append(wx.NewId(), "D-parameter\tCtrl+D")
     window.Bind(wx.EVT_MENU, window.on_differentiate, Dparam_item)
-
-    ID_item = tools_menu.Append(wx.NewId(), "Element ID\tCtrl+I")
-    window.Bind(wx.EVT_MENU, window.open_periodic_table, ID_item)
 
     # Thickogram
     thickogram_item = tools_menu.Append(wx.NewId(), "Thickogram Calculator - beta")
     window.Bind(wx.EVT_MENU, lambda event: open_thickogram_window(window), thickogram_item)
+
+    # Add VBM and Auto ID to Tools menu
+    VBM_item = tools_menu.Append(wx.NewId(), "VBM / Fermi / Cut-Off")
+    window.Bind(wx.EVT_MENU, lambda event: window.on_open_vbm_window(), VBM_item)
+
+    plot_mod_item = tools_menu.Append(wx.NewId(), "Plot Modifications")
+    window.Bind(wx.EVT_MENU, lambda event: PlotModWindow(window).Show(), plot_mod_item)
+
+    pID_header = tools_menu.Append(wx.ID_ANY, "▬▬▬ Peak ID ▬▬▬▬▬▬▬▬")
+    pID_header.Enable(False)  # Make it non-clickable
+
+    AutoID_item = tools_menu.Append(wx.NewId(), "Auto Peak ID -- (Beta)")
+    window.Bind(wx.EVT_MENU, lambda event: window.on_open_auto_id(), AutoID_item)
+
+    # Manual Element Identifications / Labels
+    ID_item = tools_menu.Append(wx.NewId(), "Manual Peak ID / Labels\tCtrl+I")
+    window.Bind(wx.EVT_MENU, window.open_periodic_table, ID_item)
+
+    Label2_header = tools_menu.Append(wx.ID_ANY, "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬")
+    Label2_header.Enable(False)  # Make it non-clickable
+
+    labels_manager_item = tools_menu.Append(wx.NewId(), "Labels Manager")
+    window.Bind(wx.EVT_MENU, window.open_labels_window, labels_manager_item)
+
+
 
     # Noise_item = tools_menu.Append(wx.NewId(), "Noise Analysis")
     # window.Bind(wx.EVT_MENU, lambda event: window.on_open_noise_analysis_window, Noise_item)
@@ -627,7 +709,7 @@ def create_menu(window):
     shortcuts_item = help_menu.Append(wx.NewId(), "List of Shortcuts\tCtrl+K")
     window.Bind(wx.EVT_MENU, lambda event: show_shortcuts(window), shortcuts_item)
 
-    manual_item = help_menu.Append(wx.NewId(), "Open Full Manual\tCtrl+M")
+    manual_item = help_menu.Append(wx.NewId(), "Open Full Manual [Still v1.5]\tCtrl+M")
     window.Bind(wx.EVT_MENU, lambda event: open_manual(window), manual_item)
 
     yt_videos_item = help_menu.Append(wx.NewId(), "KherveFitting Videos")
@@ -915,12 +997,16 @@ def create_horizontal_toolbar(parent, window):
                 pass
 
         # Show dialog with current sheet name pre-populated
-        dlg = wx.TextEntryDialog(window, 'Enter new sheet name:', 'Rename Sheet', current_sheet_name)
+        dlg = wx.TextEntryDialog(window, 'Enter new sheet name (single word only):', 'Rename Sheet', current_sheet_name)
         if dlg.ShowModal() == wx.ID_OK:
             new_name = dlg.GetValue()
             if new_name and new_name != current_sheet_name:
-                from libraries.Utilities import rename_sheet
-                rename_sheet(window, new_name)
+                # Check for single word validation
+                if len(new_name.split()) > 1:
+                    window.show_popup_message2("Invalid Name", "Only a single word is allowed for sheet names or core levels.")
+                else:
+                    from libraries.Utilities import rename_sheet
+                    rename_sheet(window, new_name)
         dlg.Destroy()
 
     crop_tool = toolbar.AddTool(wx.ID_ANY, 'Crop',
@@ -953,8 +1039,12 @@ def create_horizontal_toolbar(parent, window):
     # Analysis tools
     bkg_tool = toolbar.AddTool(wx.ID_ANY, 'Background', wx.Bitmap(os.path.join(icon_path, "BKG-3.png"),
                                                                   wx.BITMAP_TYPE_PNG), shortHelp="Calculate Area "
-                                                                                                 "Under Curve\tCtrl+A")
+                                                                                                 "Under Curve")
     fitting_tool = toolbar.AddTool(wx.ID_ANY, 'Fitting', wx.Bitmap(os.path.join(icon_path, "C1s-3.png"),
+                                                                   wx.BITMAP_TYPE_PNG), shortHelp="Create Peaks "
+                                                                                                  "Model \tCtrl+P")
+
+    mini_fitting_tool = toolbar.AddTool(wx.ID_ANY, 'Fitting', wx.Bitmap(os.path.join(icon_path, "C1sMini-3.png"),
                                                                    wx.BITMAP_TYPE_PNG), shortHelp="Create Peaks "
                                                                                                   "Model \tCtrl+P")
 
@@ -983,11 +1073,27 @@ def create_horizontal_toolbar(parent, window):
     window.Bind(wx.EVT_TOOL, lambda evt: PlotModWindow(window).Show(), plot_mod_tool)
     window.Bind(wx.EVT_TOOL, lambda evt: open_thickogram_window(window), thickogram_tool)
 
+    # Add tool to toolbar
+    vb_tool = toolbar.AddTool(wx.ID_ANY, 'VB',
+                                   wx.Bitmap(os.path.join(icon_path, "VBM-3.png"), wx.BITMAP_TYPE_PNG),
+                                   shortHelp='VB Measurements')
+
+    def open_vb_measurements(event):
+        if not hasattr(window, 'vb_measurements_window') or window.vb_measurements_window is None:
+            window.vb_measurements_window = VB_measurements(window, window)
+        else:
+            window.vb_measurements_window.Raise()
+
+    window.Bind(wx.EVT_TOOL, open_vb_measurements, vb_tool)
+
     toolbar.AddSeparator()
 
-    # noise_analysis_tool = toolbar.AddTool(wx.ID_ANY, 'Noise Analysis',
-    #                                       wx.Bitmap(os.path.join(icon_path, "Noise-25.png"), wx.BITMAP_TYPE_PNG),
-    #                                       shortHelp="Open Noise Analysis Window")
+
+    # Add AutoID tool
+    auto_id_tool = toolbar.AddTool(wx.ID_ANY, 'Auto ID',
+                                   wx.Bitmap(os.path.join(icon_path, "IDauto-3.png"), wx.BITMAP_TYPE_PNG),
+                                   shortHelp="Automatic element identification for survey scans")
+    window.Bind(wx.EVT_TOOL, lambda event: window.on_auto_id(event), auto_id_tool)
 
 
     id_tool = toolbar.AddTool(wx.ID_ANY, 'ID', wx.Bitmap(os.path.join(icon_path, "ID-3.png"), wx.BITMAP_TYPE_PNG),
@@ -1067,7 +1173,7 @@ def create_horizontal_toolbar(parent, window):
     toolbar.Realize()
 
     # Bind events
-    bind_toolbar_events(window, open_file_tool, refresh_folder_tool, bkg_tool, fitting_tool,
+    bind_toolbar_events(window, open_file_tool, refresh_folder_tool, bkg_tool, fitting_tool, mini_fitting_tool,
                         # noise_analysis_tool,
                         # toggle_legend_tool, toggle_fit_results_tool, toggle_residuals_tool, plot_tool, toggle_peak_fill_tool,
                         save_tool, #save_plot_tool,
@@ -1186,7 +1292,7 @@ def add_vertical_separator(toolbar, separators):
     separators[-1].SetSize((2, 24))
     toolbar.AddControl(separators[-1])
 
-def bind_toolbar_events(window, open_file_tool, refresh_folder_tool, bkg_tool, fitting_tool,
+def bind_toolbar_events(window, open_file_tool, refresh_folder_tool, bkg_tool, fitting_tool, mini_fitting_tool,
                         # noise_analysis_tool,
                         save_tool, #save_plot_tool,
                         save_all_tool, toggle_Col_1_tool, export_tool, auto_be_button, id_tool
@@ -1195,7 +1301,8 @@ def bind_toolbar_events(window, open_file_tool, refresh_folder_tool, bkg_tool, f
     window.Bind(wx.EVT_TOOL, lambda event: open_xlsx_file(window), open_file_tool)
     window.Bind(wx.EVT_TOOL, lambda event: refresh_sheets(window, on_sheet_selected_wrapper), refresh_folder_tool)
     window.Bind(wx.EVT_TOOL, lambda event: window.on_open_background_window(), bkg_tool)
-    window.Bind(wx.EVT_TOOL, lambda event: window.on_open_fitting_window(), fitting_tool)
+    window.Bind(wx.EVT_TOOL, lambda event: window.on_open_fitting_window(normal=True), fitting_tool)
+    window.Bind(wx.EVT_TOOL, lambda event: window.on_open_fitting_window(normal=False), mini_fitting_tool)
     window.sheet_combobox.Bind(wx.EVT_COMBOBOX, lambda event: on_sheet_selected_wrapper(window, event))
     window.Bind(wx.EVT_TOOL, lambda event: on_save(window), save_tool)
     # window.Bind(wx.EVT_TOOL, lambda event: on_save_plot(window), save_plot_tool)
@@ -1375,6 +1482,79 @@ def create_vertical_toolbar(parent, frame):
 
     return v_toolbar
 
+
+def create_examples_menu(window):
+    """Create dynamic examples menu from Open Examples folder structure"""
+    examples_menu = wx.Menu()
+
+    # Get the path to Data-Examples folder (same level as executable)
+    import sys
+    if getattr(sys, 'frozen', False):
+        # Running as executable
+        executable_dir = os.path.dirname(sys.executable)
+    else:
+        # Running from source
+        executable_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    examples_path = os.path.join(executable_dir, "Data-Examples")
+
+    if not os.path.exists(examples_path):
+        no_examples_item = examples_menu.Append(wx.NewId(), "No Examples Folder Found")
+        no_examples_item.Enable(False)
+        return examples_menu
+
+    try:
+        # Get all subdirectories in Open Examples
+        subdirs = [d for d in os.listdir(examples_path)
+                   if os.path.isdir(os.path.join(examples_path, d))]
+        subdirs.sort()
+
+        if not subdirs:
+            no_examples_item = examples_menu.Append(wx.NewId(), "No Example Categories Found")
+            no_examples_item.Enable(False)
+            return examples_menu
+
+        # Create submenu for each subdirectory
+        for subdir in subdirs:
+            subdir_path = os.path.join(examples_path, subdir)
+            subdir_menu = wx.Menu()
+
+            # Get all xlsx files in this subdirectory
+            xlsx_files = [f for f in os.listdir(subdir_path)
+                          if f.lower().endswith('.xlsx')]
+            xlsx_files.sort()
+
+            if xlsx_files:
+                # Add each xlsx file as menu item
+                for xlsx_file in xlsx_files:
+                    file_path = os.path.join(subdir_path, xlsx_file)
+                    # Remove .xlsx extension for cleaner menu display
+                    display_name = os.path.splitext(xlsx_file)[0]
+
+                    menu_item = subdir_menu.Append(wx.NewId(), display_name)
+                    window.Bind(wx.EVT_MENU,
+                                lambda event, path=file_path: open_example_file(window, path),
+                                menu_item)
+            else:
+                no_files_item = subdir_menu.Append(wx.NewId(), "No xlsx files found")
+                no_files_item.Enable(False)
+
+            examples_menu.AppendSubMenu(subdir_menu, subdir)
+
+    except Exception as e:
+        error_item = examples_menu.Append(wx.NewId(), f"Error loading examples: {str(e)}")
+        error_item.Enable(False)
+
+    return examples_menu
+
+
+def open_example_file(window, file_path):
+    """Open an example xlsx file"""
+    try:
+        from libraries.FileMenu.Open import open_xlsx_file
+        open_xlsx_file(window, file_path)
+    except Exception as e:
+        window.show_popup_message2("Error", f"Error opening example file: {str(e)}")
 
 def create_statusbar(window):
     """

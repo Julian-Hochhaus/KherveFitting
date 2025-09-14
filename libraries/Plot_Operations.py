@@ -275,6 +275,247 @@ class PlotManager:
                 self.ax.plot(x_values, normalized_deriv, '-', color=color, label=peak_label)
 
             return background  # Return background unchanged
+        elif fitting_model == "Fermi":
+            # Access Fermi data from window.Data structure
+            sheet_name = window.sheet_combobox.GetValue()
+            if sheet_name in window.Data['Core levels']:
+                fitting_data = window.Data['Core levels'][sheet_name].get('Fitting', {})
+                peaks_data = fitting_data.get('Peaks', {})
+
+                # Find Fermi peak by fitting model instead of fixed name
+                fermi_data = {}
+                for peak_name, peak_info in peaks_data.items():
+                    if peak_info.get('Fitting Model') == 'Fermi':
+                        fermi_data = peak_info
+                        break
+
+                if 'Fitted_X' in fermi_data and 'Fitted_Y' in fermi_data:
+                    fitted_x = np.array(fermi_data['Fitted_X'])
+                    fitted_y = np.array(fermi_data['Fitted_Y'])
+
+                    if window.energy_scale == 'KE':
+                        plot_x = window.photons - fitted_x
+                    else:
+                        plot_x = fitted_x
+
+                    # Plot Fermi fit
+                    if window.energy_scale == 'KE':
+                        self.ax.plot(plot_x, fitted_y, '-', color=color, linewidth=1, label=peak_label)
+                    else:
+                        self.ax.plot(plot_x, fitted_y, '-', color=color, linewidth=1, label=peak_label)
+
+                    # Add center line with position in legend
+                    center_pos = fermi_data.get('Fermi_Center', fermi_data.get('Position', 0))
+                    if window.energy_scale == 'KE':
+                        center_display = window.photons - center_pos
+                    else:
+                        center_display = center_pos
+
+                    # self.ax.axvline(center_display, color='green', linestyle='--',
+                    #                 linewidth=1, alpha=0.7,
+                    #                 label=f'Center: {center_pos:.3f} eV')
+
+                    # Add 16%-84% edge lines with width in meV in legend
+                    width_16_84 = fermi_data.get('Fermi_16_84_Width', fermi_data.get('FWHM', 0))
+                    edge_left = center_pos - width_16_84 / 2
+                    edge_right = center_pos + width_16_84 / 2
+
+                    if window.energy_scale == 'KE':
+                        edge_left_display = window.photons - edge_left
+                        edge_right_display = window.photons - edge_right
+                    else:
+                        edge_left_display = edge_left
+                        edge_right_display = edge_right
+
+                    # Show width in meV in legend
+                    self.ax.axvline(edge_left_display, color='orange', linestyle=':',
+                                    alpha=0.6,
+                                    label=f'16%-84%: {width_16_84 * 1000:.1f} meV')
+                    self.ax.axvline(edge_right_display, color='orange', linestyle=':', alpha=0.6)
+
+                    self.ax.axvline(center_display, color='green', linestyle='--',
+                                    linewidth=1, alpha=0.7,
+                                    label=f'Center: {center_pos:.3f} eV')
+
+            return background  # Return background unchanged
+        elif fitting_model == "VBM":
+            # Get VBM data from the Data structure (like Fermi does)
+            sheet_name = window.sheet_combobox.GetValue()
+            if ('Fitting' in window.Data['Core levels'][sheet_name] and
+                    'Peaks' in window.Data['Core levels'][sheet_name]['Fitting']):
+
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                vbm_data = None
+
+                # Find VBM peak data
+                for peak_name, peak_info in peaks_data.items():
+                    if peak_info.get('Fitting Model') == 'VBM':
+                        vbm_data = peak_info
+                        break
+
+                if vbm_data:
+                    # Get VBM parameters from stored data
+                    vbm_position = vbm_data.get('Position', 0)
+                    edge_center = vbm_data.get('VBM_Edge_Center', 0)
+                    bg_center = vbm_data.get('VBM_BG_Center', 0)
+                    use_bg = bool(vbm_data.get('VBM_Use_BG', False))
+
+                    # Get extrapolation data
+                    signal_coef = vbm_data.get('Signal_Coef')
+                    bg_coef = vbm_data.get('BG_Coef')
+                    x_signal_fit = vbm_data.get('X_Signal_Fit')
+                    y_signal_fit = vbm_data.get('Y_Signal_Fit')
+                    x_bg_fit = vbm_data.get('X_BG_Fit')
+                    y_bg_fit = vbm_data.get('Y_BG_Fit')
+
+                    if window.energy_scale == 'KE':
+                        vbm_display = window.photons - vbm_position
+                        edge_display = window.photons - edge_center
+                        bg_display = window.photons - bg_center
+                    else:
+                        vbm_display = vbm_position
+                        edge_display = edge_center
+                        bg_display = bg_center
+
+                    # VBM position line (purple dashed, linewidth 1) - WITH LEGEND
+                    window.ax.axvline(vbm_display, color='Green', linestyle='--',
+                                      linewidth=1, label=f'VBM = {vbm_position:.2f} eV')
+
+
+                    # Draw signal extrapolation line (red dashed, linewidth 1, alpha 0.6) - WITH LEGEND
+                    if signal_coef and len(signal_coef) == 2:
+                        x_extrap = np.linspace(min(x_values), max(x_values), 100)
+                        if window.energy_scale == 'KE':
+                            y_extrap = signal_coef[0] * (window.photons - x_extrap) + signal_coef[1]
+                            window.ax.plot(x_extrap, y_extrap, 'r--', linewidth=1, alpha=0.6,
+                                           label='Linear Extrapolation')
+                        else:
+                            y_extrap = signal_coef[0] * x_extrap + signal_coef[1]
+                            window.ax.plot(x_extrap, y_extrap, 'r--', linewidth=1, alpha=0.6,
+                                           label='Linear Extrapolation')
+
+                    # Draw signal fit points (blue circles, markersize 2) - NO LEGEND
+                    if x_signal_fit and y_signal_fit:
+                        x_sig = np.array(x_signal_fit)
+                        y_sig = np.array(y_signal_fit)
+                        if window.energy_scale == 'KE':
+                            window.ax.plot(window.photons - x_sig, y_sig, 'bo', markersize=2)
+                        else:
+                            window.ax.plot(x_sig, y_sig, 'bo', markersize=2)
+
+                    # Draw background extrapolation and points if used
+                    if use_bg and bg_coef and len(bg_coef) == 2:
+                        # Background extrapolation line (blue dashed, linewidth 1) - WITH LEGEND
+                        x_bg_extrap = np.linspace(min(x_values), max(x_values), 100)
+                        if window.energy_scale == 'KE':
+                            y_bg_extrap = bg_coef[0] * (window.photons - x_bg_extrap) + bg_coef[1]
+                            window.ax.plot(x_bg_extrap, y_bg_extrap, 'b--', linewidth=1,
+                                           label='Background Fit')
+                        else:
+                            y_bg_extrap = bg_coef[0] * x_bg_extrap + bg_coef[1]
+                            window.ax.plot(x_bg_extrap, y_bg_extrap, 'b--', linewidth=1,
+                                           label='Background Fit')
+
+                        # Draw background fit points (blue circles, markersize 2) - NO LEGEND
+                        if x_bg_fit and y_bg_fit:
+                            x_bg = np.array(x_bg_fit)
+                            y_bg = np.array(y_bg_fit)
+                            if window.energy_scale == 'KE':
+                                window.ax.plot(window.photons - x_bg, y_bg, 'bo', markersize=2)
+                            else:
+                                window.ax.plot(x_bg, y_bg, 'bo', markersize=2)
+
+            # CRITICAL: Return early to avoid peak_model.eval() call
+            return
+        elif fitting_model == "Cut-Off":
+            # Get Cut-Off data from the Data structure (like Fermi does)
+            sheet_name = window.sheet_combobox.GetValue()
+            if ('Fitting' in window.Data['Core levels'][sheet_name] and
+                    'Peaks' in window.Data['Core levels'][sheet_name]['Fitting']):
+
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                cutoff_data = None
+
+                # Find Cut-Off peak data
+                for peak_name, peak_info in peaks_data.items():
+                    if peak_info.get('Fitting Model') == 'Cut-Off':
+                        cutoff_data = peak_info
+                        break
+
+                if cutoff_data:
+                    # Get Cut-Off parameters from stored data
+                    cutoff_position = cutoff_data.get('Position', 0)
+                    edge_center = cutoff_data.get('Cut-Off_Edge_Center', 0)
+                    bg_center = cutoff_data.get('Cut-Off_BG_Center', 0)
+                    use_bg = bool(cutoff_data.get('Cut-Off_Use_BG', False))
+
+                    # Get extrapolation data
+                    signal_coef = cutoff_data.get('Signal_Coef')
+                    bg_coef = cutoff_data.get('BG_Coef')
+                    x_signal_fit = cutoff_data.get('X_Signal_Fit')
+                    y_signal_fit = cutoff_data.get('Y_Signal_Fit')
+                    x_bg_fit = cutoff_data.get('X_BG_Fit')
+                    y_bg_fit = cutoff_data.get('Y_BG_Fit')
+
+                    if window.energy_scale == 'KE':
+                        cutoff_display = window.photons - cutoff_position
+                        edge_display = window.photons - edge_center
+                        bg_display = window.photons - bg_center
+                    else:
+                        cutoff_display = cutoff_position
+                        edge_display = edge_center
+                        bg_display = bg_center
+
+                    # Cut-Off position line (orange dashed, linewidth 1) - WITH LEGEND
+                    window.ax.axvline(cutoff_display, color='Orange', linestyle='--',
+                                      linewidth=1, label=f'Cut-Off = {cutoff_position:.2f} eV')
+
+                    # Draw signal extrapolation line (red dashed, linewidth 1, alpha 0.6) - WITH LEGEND
+                    if signal_coef and len(signal_coef) == 2:
+                        x_extrap = np.linspace(min(x_values), max(x_values), 100)
+                        if window.energy_scale == 'KE':
+                            y_extrap = signal_coef[0] * (window.photons - x_extrap) + signal_coef[1]
+                            window.ax.plot(x_extrap, y_extrap, 'r--', linewidth=1, alpha=0.6,
+                                           label='Linear Extrapolation')
+                        else:
+                            y_extrap = signal_coef[0] * x_extrap + signal_coef[1]
+                            window.ax.plot(x_extrap, y_extrap, 'r--', linewidth=1, alpha=0.6,
+                                           label='Linear Extrapolation')
+
+                    # Draw signal fit points (blue circles, markersize 2) - NO LEGEND
+                    if x_signal_fit and y_signal_fit:
+                        x_sig = np.array(x_signal_fit)
+                        y_sig = np.array(y_signal_fit)
+                        if window.energy_scale == 'KE':
+                            window.ax.plot(window.photons - x_sig, y_sig, 'bo', markersize=2)
+                        else:
+                            window.ax.plot(x_sig, y_sig, 'bo', markersize=2)
+
+                    # Draw background extrapolation and points if used
+                    if use_bg and bg_coef and len(bg_coef) == 2:
+                        # Background extrapolation line (blue dashed, linewidth 1) - WITH LEGEND
+                        x_bg_extrap = np.linspace(min(x_values), max(x_values), 100)
+                        if window.energy_scale == 'KE':
+                            y_bg_extrap = bg_coef[0] * (window.photons - x_bg_extrap) + bg_coef[1]
+                            window.ax.plot(x_bg_extrap, y_bg_extrap, 'b--', linewidth=1,
+                                           label='Background Fit')
+                        else:
+                            y_bg_extrap = bg_coef[0] * x_bg_extrap + bg_coef[1]
+                            window.ax.plot(x_bg_extrap, y_bg_extrap, 'b--', linewidth=1,
+                                           label='Background Fit')
+
+                        # Draw background fit points (blue circles, markersize 2) - NO LEGEND
+                        if x_bg_fit and y_bg_fit:
+                            x_bg = np.array(x_bg_fit)
+                            y_bg = np.array(y_bg_fit)
+                            if window.energy_scale == 'KE':
+                                window.ax.plot(window.photons - x_bg, y_bg, 'bo', markersize=2)
+                            else:
+                                window.ax.plot(x_bg, y_bg, 'bo', markersize=2)
+
+            # CRITICAL: Return early to avoid peak_model.eval() call
+            return
+
         elif fitting_model in ["Voigt (Area, L/G, \u03c3)", "Voigt (Area, \u03c3, \u03b3)"]:
             peak_model = lmfit.models.VoigtModel()
             sigma = float(peak_params.get('sigma', 1.2)) / 2.355
@@ -384,8 +625,81 @@ class PlotManager:
             line_color = color
 
         line_alpha = min(alpha + 0.1, 1)
+        # if self.peak_fill_enabled:
+        #     label = peak_label
+        #
+        #     # Identify doublets
+        #     num_peaks = window.peak_params_grid.GetNumberRows() // 2
+        #     doublets = []
+        #     for i in range(0, num_peaks - 1):
+        #         current_label = window.peak_params_grid.GetCellValue(i * 2, 1)
+        #         next_label = window.peak_params_grid.GetCellValue((i + 1) * 2, 1)
+        #         if self.is_part_of_doublet(current_label, next_label):
+        #             doublets.extend([i, i + 1])
+        #
+        #     # Find current peak index
+        #     for i in range(num_peaks):
+        #         if window.peak_params_grid.GetCellValue(i * 2, 1) == peak_label:
+        #             peak_index = i
+        #             break
+        #
+        #     # If part of doublet, get fill type from first peak of the pair
+        #     if peak_index in doublets:
+        #         if doublets.index(peak_index) % 2 == 1:  # Second peak of doublet
+        #             peak_index = peak_index - 1  # Use first peak's settings
+        #
+        #     if window.peak_fill_types[peak_index] == "Solid Fill":
+        #         fill_params = {
+        #             'color': color,
+        #             'alpha': alpha,
+        #             'edgecolor': 'none'
+        #         }
+        #     elif window.peak_fill_types[peak_index] == "Hatch":
+        #         fill_params = {
+        #             'color': 'none',
+        #             'hatch': window.peak_hatch_patterns[peak_index] * window.hatch_density,
+        #             'linewidth': window.peak_line_thickness,
+        #             'edgecolor': color,
+        #             'alpha': alpha
+        #         }
+        #     elif window.peak_fill_types[peak_index] == "None":
+        #         # Skip the fill_between call and only draw the line
+        #         if window.peak_line_style != "No Line":
+        #             if window.energy_scale == 'KE':
+        #                 self.ax.plot(window.photons - x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
+        #                              linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern,
+        #                              label=peak_label)
+        #             else:
+        #                 self.ax.plot(x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
+        #                              linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern,
+        #                              label=peak_label)
+        #         return peak_y
+
+        # From Here---------------------------------------
+
         if self.peak_fill_enabled:
             label = peak_label
+
+            # Get background regions from recorded ranges
+            bg_regions = self.get_background_regions(window)
+
+            # Apply background region masking using NaN - DO THIS FIRST
+            if bg_regions is not None and len(bg_regions) > 0:
+                # Create mask for all background regions
+                region_mask = np.zeros(len(x_values), dtype=bool)
+                for bg_start, bg_end in bg_regions:
+                    region_mask |= (x_values >= bg_start) & (x_values <= bg_end)
+
+                # IMPORTANT: Always work with copies to avoid affecting original data
+                peak_y_masked = peak_y.copy()  # This is already a copy
+                peak_y_masked[~region_mask] = np.nan
+
+                background_masked = background.copy()  # This is already a copy
+                background_masked[~region_mask] = np.nan
+            else:
+                # No masking - but still use copies
+                peak_y_masked = peak_y.copy()
+                background_masked = background.copy()
 
             # Identify doublets
             num_peaks = window.peak_params_grid.GetNumberRows() // 2
@@ -397,6 +711,7 @@ class PlotManager:
                     doublets.extend([i, i + 1])
 
             # Find current peak index
+            peak_index = 0  # Default value
             for i in range(num_peaks):
                 if window.peak_params_grid.GetCellValue(i * 2, 1) == peak_label:
                     peak_index = i
@@ -424,22 +739,40 @@ class PlotManager:
             elif window.peak_fill_types[peak_index] == "None":
                 # Skip the fill_between call and only draw the line
                 if window.peak_line_style != "No Line":
+                    # Determine line color
+                    if window.peak_line_style == "Black":
+                        line_color = "black"
+                    elif window.peak_line_style == "Grey":
+                        line_color = "grey"
+                    elif window.peak_line_style == "Yellow":
+                        line_color = "yellow"
+                    else:  # same_color
+                        line_color = color
+
                     if window.energy_scale == 'KE':
-                        self.ax.plot(window.photons - x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
+                        self.ax.plot(window.photons - x_values, peak_y_masked, color=line_color, alpha=window.peak_line_alpha,
                                      linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern,
                                      label=peak_label)
                     else:
-                        self.ax.plot(x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
+                        self.ax.plot(x_values, peak_y_masked, color=line_color, alpha=window.peak_line_alpha,
                                      linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern,
                                      label=peak_label)
-                return peak_y
+                return peak_y  # CRITICAL: Return original peak_y, not peak_y_masked
 
-            if window.energy_scale == 'KE':
-                self.ax.fill_between(window.photons - x_values, background, peak_y,
-                                     interpolate=True, label=peak_label, **fill_params)
+
+            if bg_regions is not None and len(bg_regions) > 0:
+                # Use masked data - only show within background regions
+                if window.energy_scale == 'KE':
+                    self.ax.fill_between(window.photons - x_values, background_masked, peak_y_masked, label=label, **fill_params)
+                else:
+                    self.ax.fill_between(x_values, background_masked, peak_y_masked, label=label, **fill_params)
             else:
-                self.ax.fill_between(x_values, background, peak_y,
-                                     interpolate=True, label=peak_label, **fill_params)
+                # Use full data (no masking) - show everywhere
+                if window.energy_scale == 'KE':
+                    self.ax.fill_between(window.photons - x_values, background, peak_y, label=label, **fill_params)
+                else:
+                    self.ax.fill_between(x_values, background, peak_y, label=label, **fill_params)
+            # AND THIS-----------------------------------------
 
             if window.peak_line_style != "No Line":
                 if window.peak_line_style == "Black":
@@ -450,13 +783,27 @@ class PlotManager:
                     line_color = "yellow"
                 else:  # same_color
                     line_color = color
-                if window.energy_scale == 'KE':
 
-                    self.ax.plot(window.photons - x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
-                             linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern)
+
+                # Use the same masking as above
+                if bg_regions is not None and len(bg_regions) > 0:
+                    # Use the same masked data
+                    if window.energy_scale == 'KE':
+                        self.ax.plot(window.photons - x_values, peak_y_masked, color=line_color, alpha=window.peak_line_alpha,
+                                     linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern)
+                    else:
+                        self.ax.plot(x_values, peak_y_masked, color=line_color, alpha=window.peak_line_alpha,
+                                     linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern)
                 else:
-                    self.ax.plot(x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
-                             linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern)
+                    # No masking - use original data
+                    if window.energy_scale == 'KE':
+                        self.ax.plot(window.photons - x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
+                                     linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern)
+                    else:
+                        self.ax.plot(x_values, peak_y, color=line_color, alpha=window.peak_line_alpha,
+                                     linewidth=window.peak_line_thickness, linestyle=window.peak_line_pattern)
+
+
 
         else:
             if window.energy_scale == 'KE':
@@ -842,7 +1189,13 @@ class PlotManager:
                 continue
             if fitting_model == "D-parameter":
                 cst_unfit = "D-parameter"
-            if fitting_model == "SurveyID":
+            elif fitting_model == "Fermi":
+                cst_unfit = "Fermi"
+            elif fitting_model == "VBM":
+                cst_unfit = "VBM"
+            elif fitting_model == "Cut-Off":
+                cst_unfit = "Cut Off"
+            elif fitting_model == "SurveyID":
                 cst_unfit = "SurveyID"
             if 'Labels' in window.Data['Core levels'][sheet_name]:
 
@@ -919,22 +1272,69 @@ class PlotManager:
                     self.plot_peak(window.x_values, window.background, peak_params, sheet_name, window,
                                                 color=color, alpha=alpha)
 
+        # # Only plot background if it's different from raw data or if Bkg Type is not empty
+        # if (core_level_data['Background'].get('Bkg Type') != "" and
+        #         core_level_data['Background'].get('Bkg Low') != "" and
+        #         core_level_data['Background'].get('Bkg High') != ""):
+        #     if window.energy_scale == 'KE':
+        #         self.ax.plot(window.photons - x_values, core_level_data['Background']['Bkg Y'],
+        #                      color=self.background_color, linewidth=self.background_thickness,
+        #                      linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background')
+        #     else:
+        #         self.ax.plot(x_values, core_level_data['Background']['Bkg Y'], color=self.background_color,
+        #                      linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background',
+        #                      linewidth=self.background_thickness)
+
+        # ADD NEW CODE HERE-----------------------------------
+
         # Only plot background if it's different from raw data or if Bkg Type is not empty
         if (core_level_data['Background'].get('Bkg Type') != "" and
                 core_level_data['Background'].get('Bkg Low') != "" and
                 core_level_data['Background'].get('Bkg High') != ""):
-            if window.energy_scale == 'KE':
-                self.ax.plot(window.photons - x_values, core_level_data['Background']['Bkg Y'],
-                             color=self.background_color, linewidth=self.background_thickness,
-                             linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background')
+
+            # Get background regions for masking
+            bg_regions = self.get_background_regions(window)
+
+            # Apply background region masking to background line
+            bg_x = x_values.copy()
+            bg_y = np.array(core_level_data['Background']['Bkg Y'])
+
+            if bg_regions is not None and len(bg_regions) > 0:
+                # Create mask for all background regions
+                region_mask = np.zeros(len(bg_x), dtype=bool)
+                for bg_start, bg_end in bg_regions:
+                    region_mask |= (bg_x >= bg_start) & (bg_x <= bg_end)
+
+                # Instead of removing points, set non-region points to NaN
+                bg_y_masked = bg_y.copy()
+                bg_y_masked[~region_mask] = np.nan
+
+                if window.energy_scale == 'KE':
+                    self.ax.plot(window.photons - bg_x, bg_y_masked,
+                                 color=self.background_color, linewidth=self.background_thickness,
+                                 linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background')
+                else:
+                    self.ax.plot(bg_x, bg_y_masked, color=self.background_color,
+                                 linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background',
+                                 linewidth=self.background_thickness)
             else:
-                self.ax.plot(x_values, core_level_data['Background']['Bkg Y'], color=self.background_color,
-                             linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background',
-                             linewidth=self.background_thickness)
+                # Plot full background if no regions defined
+                if window.energy_scale == 'KE':
+                    self.ax.plot(window.photons - bg_x, bg_y,
+                                 color=self.background_color, linewidth=self.background_thickness,
+                                 linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background')
+                else:
+                    self.ax.plot(bg_x, bg_y, color=self.background_color,
+                                 linestyle=self.background_linestyle, alpha=self.background_alpha, label='Background',
+                                 linewidth=self.background_thickness)
+        # TO HERE-------------------------------------------
 
 
         # Update overall fit and residuals
-        if cst_unfit in ["Unfitted","D-parameter","SurveyID"] or any(x in sheet_name.lower() for x in ["survey", "wide"]):
+        if cst_unfit in ["Unfitted","D-parameter","Fermi","VBM", "Cut Off","SurveyID"] or any(x in sheet_name.lower()
+                                                                                            for x in [
+            "survey", \
+                "wide"]):
             pass
         else:
             window.update_overall_fit_and_residuals()
@@ -1004,6 +1404,12 @@ class PlotManager:
                 self.ax.set_ylabel("Intensity (a.u.)")
                 for label in self.ax.get_yticklabels():
                     label.set_visible(False)
+
+        # Restore vlines if fitting window is open and background tab is selected
+        if (hasattr(window, 'fitting_window') and window.fitting_window is not None and
+                hasattr(window, 'background_tab_selected') and window.background_tab_selected):
+            window.show_hide_vlines()
+
 
         # Draw the canvas
         self.canvas.draw_idle()
@@ -1145,7 +1551,7 @@ class PlotManager:
                 gamma = fwhm / 2
                 area = y * ((1 - lg_ratio / 100) * sigma * np.sqrt(2 * np.pi) + (lg_ratio / 100) * np.pi * gamma)
                 params = peak_model.make_params(center=x, fwhm=fwhm, fraction=lg_ratio, area=area)
-            elif window.selected_fitting_method == "D-parameter":
+            elif window.selected_fitting_method in ["D-parameter", "Fermi", "VBM", "Cut-Off"]:
                 # return area, 0, 0  # Return original area and zero for normalized/relative areas
                 return 0, 0, 0  # Return original area and zero for normalized/relative areas
             else:  # Default to GL (Height) as a safe bet
@@ -1155,7 +1561,7 @@ class PlotManager:
             peak_y = peak_model.eval(params, x=window.x_values) + window.background
 
             # Update overall fit and residuals
-            if peak_model in ["D-parameter", "SurveyID"]:
+            if peak_model in ["D-parameter", "SurveyID", "Fermi", "VBM", "Cut-Off"]:
                 print("")
             else:
                 window.update_overall_fit_and_residuals()
@@ -1315,6 +1721,13 @@ class PlotManager:
             elif fitting_model == "D-parameter":
                 # Skip D-parameter in overall fit calculation
                 continue
+            elif fitting_model == "Fermi":
+                continue
+            elif fitting_model == "VBM":
+                continue
+            elif fitting_model == "Cut-Off":
+                # Skip Cut-Off in overall fit calculation
+                continue
             elif fitting_model == "SurveyID":
                 # Skip D-parameter in overall fit calculation
                 continue
@@ -1347,12 +1760,16 @@ class PlotManager:
         # masked_residuals = ma.masked_where(np.isclose(scaled_residuals, 0, atol=5e-1), scaled_residuals)
         # masked_residuals2 = ma.masked_where(np.isclose(scaled_residuals, 0, atol=5e-1), residuals)
 
-        # Calculate threshold as percentage of maximum intensity
-        threshold = 0.0005 * np.max(np.abs(scaled_residuals))  # 5% of max residual
+        # # Calculate threshold as percentage of maximum intensity
+        # threshold = 0.0005 * np.max(np.abs(scaled_residuals))  # 5% of max residual
+        #
+        # # Create a masked array using threshold instead of zero
+        # masked_residuals = ma.masked_where(np.abs(scaled_residuals) < threshold, scaled_residuals)
+        # masked_residuals2 = ma.masked_where(np.abs(scaled_residuals) < threshold, residuals)
 
-        # Create a masked array using threshold instead of zero
-        masked_residuals = ma.masked_where(np.abs(scaled_residuals) < threshold, scaled_residuals)
-        masked_residuals2 = ma.masked_where(np.abs(scaled_residuals) < threshold, residuals)
+        # No masking - use all residual values
+        masked_residuals = scaled_residuals
+        masked_residuals2 = residuals
 
         # Remove old overall fit and residuals, keep background lines
         for line in self.ax.lines:
@@ -1361,26 +1778,120 @@ class PlotManager:
 
 
 
-        # Plot the overall fit
+        # # Plot the overall fit
+        # try:
+        #     good_indices = ~np.isnan(overall_fit)
+        #     x_plot = x_values[good_indices]
+        #     y_plot = overall_fit[good_indices]
+        #     # x_plot = x_values
+        #     # y_plot = overall_fit
+        #     if window.energy_scale == 'KE':
+        #         self.ax.plot(window.photons - window.x_values, overall_fit, color=self.envelope_color,
+        #                      linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
+        #                      linewidth=self.envelope_thickness,
+        #                      label='D-parameter' if fitting_model == "D-parameter" else
+        #                             'Fermi' if fitting_model == "Fermi" else
+        #                             'VBM' if fitting_model == "VBM" else
+        #                             'Cut-Off' if fitting_model == "Cut-Off" else
+        #                             'Overall Fit')
+        #     else:
+        #         # self.ax.plot(window.x_values, overall_fit, color=self.envelope_color,
+        #         self.ax.plot(x_plot, y_plot, color=self.envelope_color,
+        #                      linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
+        #                      linewidth=self.envelope_thickness,
+        #                      label='D-parameter' if fitting_model == "D-parameter" else
+        #                      'Fermi' if fitting_model == "Fermi" else
+        #                      'VBM' if fitting_model == "VBM" else
+        #                      'Cut-Off' if fitting_model == "Cut-Off" else
+        #                      'Overall Fit')
+        # except:
+        #     return
+
+        # Add HERE --------------------------------
+        # Get background regions for envelope masking too
+        bg_regions = self.get_background_regions(window)
+
+        # Plot the overall fit with region masking
         try:
             good_indices = ~np.isnan(overall_fit)
             x_plot = x_values[good_indices]
             y_plot = overall_fit[good_indices]
-            # x_plot = x_values
-            # y_plot = overall_fit
-            if window.energy_scale == 'KE':
-                self.ax.plot(window.photons - window.x_values, overall_fit, color=self.envelope_color,
-                             linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
-                             linewidth=self.envelope_thickness,
-                             label='D-parameter' if fitting_model == "D-parameter" else 'Overall Fit')
+
+            # Apply background region masking to envelope
+            if bg_regions is not None and len(bg_regions) > 0:
+                region_mask = np.zeros(len(x_plot), dtype=bool)
+                for bg_start, bg_end in bg_regions:
+                    region_mask |= (x_plot >= bg_start) & (x_plot <= bg_end)
+
+                # Set non-region points to NaN instead of removing them
+                y_plot_masked = y_plot.copy()
+                y_plot_masked[~region_mask] = np.nan
+
+                if window.energy_scale == 'KE':
+                    self.ax.plot(window.photons - x_plot, y_plot_masked, color=self.envelope_color,
+                                 linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
+                                 linewidth=self.envelope_thickness,
+                                 label='D-parameter' if fitting_model == "D-parameter" else
+                                 'Fermi' if fitting_model == "Fermi" else
+                                 'VBM' if fitting_model == "VBM" else
+                                 'Cut-Off' if fitting_model == "Cut-Off" else
+                                 'Overall Fit')
+                else:
+                    self.ax.plot(x_plot, y_plot_masked, color=self.envelope_color,
+                                 linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
+                                 linewidth=self.envelope_thickness,
+                                 label='D-parameter' if fitting_model == "D-parameter" else
+                                 'Fermi' if fitting_model == "Fermi" else
+                                 'VBM' if fitting_model == "VBM" else
+                                 'Cut-Off' if fitting_model == "Cut-Off" else
+                                 'Overall Fit')
             else:
-                # self.ax.plot(window.x_values, overall_fit, color=self.envelope_color,
-                self.ax.plot(x_plot, y_plot, color=self.envelope_color,
-                             linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
-                             linewidth=self.envelope_thickness,
-                             label='D-parameter' if fitting_model == "D-parameter" else 'Overall Fit')
+                # Plot full envelope if no masking
+                if window.energy_scale == 'KE':
+                    self.ax.plot(window.photons - x_plot, y_plot, color=self.envelope_color,
+                                 linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
+                                 linewidth=self.envelope_thickness,
+                                 label='D-parameter' if fitting_model == "D-parameter" else
+                                 'Fermi' if fitting_model == "Fermi" else
+                                 'VBM' if fitting_model == "VBM" else
+                                 'Cut-Off' if fitting_model == "Cut-Off" else
+                                 'Overall Fit')
+                else:
+                    self.ax.plot(x_plot, y_plot, color=self.envelope_color,
+                                 linestyle=self.envelope_linestyle, alpha=self.envelope_alpha,
+                                 linewidth=self.envelope_thickness,
+                                 label='D-parameter' if fitting_model == "D-parameter" else
+                                 'Fermi' if fitting_model == "Fermi" else
+                                 'VBM' if fitting_model == "VBM" else
+                                 'Cut-Off' if fitting_model == "Cut-Off" else
+                                 'Overall Fit')
         except:
             return
+        # Add END --------------------------------
+
+        # # Handle residuals based on state
+        # if hasattr(self, 'residuals_state'):
+        #     if self.residuals_state == 1:  # On main plot
+        #         residual_height = 1.07 * max(window.y_values)
+        #         residual_base = self.ax.axhline(y=residual_height, color='grey', linestyle='-.', alpha=0.1)
+        #
+        #         if window.energy_scale == 'KE':
+        #             residual_line = self.ax.plot(window.photons - window.x_values, masked_residuals + residual_height,
+        #                                          color=self.residual_color, linestyle=self.residual_linestyle,
+        #                                          alpha=self.residual_alpha, label='Residuals',
+        #                                          linewidth=self.residual_thickness)
+        #         else:
+        #             residual_line = self.ax.plot(window.x_values, masked_residuals + residual_height,
+        #                                          color=self.residual_color, linestyle=self.residual_linestyle,
+        #                                          alpha=self.residual_alpha, label='Residuals',
+        #                                          linewidth=self.residual_thickness)
+        #
+        #         residual_line[0].set_visible(True)
+        #         residual_base.set_visible(True)
+        #         self.ax.get_xaxis().set_visible(True)
+        #     elif self.residuals_state == 2:  # Separate subplot
+        #         self.setup_residual_subplot(window, x_values, masked_residuals, self.residual_thickness,
+        #                                     scaling_factor=1.0)
 
         # Handle residuals based on state
         if hasattr(self, 'residuals_state'):
@@ -1388,13 +1899,33 @@ class PlotManager:
                 residual_height = 1.07 * max(window.y_values)
                 residual_base = self.ax.axhline(y=residual_height, color='grey', linestyle='-.', alpha=0.1)
 
+                # Apply background region masking to residuals
+                bg_regions = self.get_background_regions(window)
+
+                if bg_regions is not None and len(bg_regions) > 0:
+                    # Create mask for residuals
+                    region_mask = np.zeros(len(window.x_values), dtype=bool)
+                    for bg_start, bg_end in bg_regions:
+                        region_mask |= (window.x_values >= bg_start) & (window.x_values <= bg_end)
+
+                    # Only mask if there are some data points in the regions
+                    if np.any(region_mask):
+                        masked_residuals_region = masked_residuals.copy()
+                        masked_residuals_region[~region_mask] = np.nan
+                    else:
+                        # No data points in background regions - skip residuals
+                        masked_residuals_region = np.full_like(masked_residuals, np.nan)
+                else:
+                    # No masking - use original masked residuals
+                    masked_residuals_region = masked_residuals
+
                 if window.energy_scale == 'KE':
-                    residual_line = self.ax.plot(window.photons - window.x_values, masked_residuals + residual_height,
+                    residual_line = self.ax.plot(window.photons - window.x_values, masked_residuals_region + residual_height,
                                                  color=self.residual_color, linestyle=self.residual_linestyle,
                                                  alpha=self.residual_alpha, label='Residuals',
                                                  linewidth=self.residual_thickness)
                 else:
-                    residual_line = self.ax.plot(window.x_values, masked_residuals + residual_height,
+                    residual_line = self.ax.plot(window.x_values, masked_residuals_region + residual_height,
                                                  color=self.residual_color, linestyle=self.residual_linestyle,
                                                  alpha=self.residual_alpha, label='Residuals',
                                                  linewidth=self.residual_thickness)
@@ -1403,9 +1934,27 @@ class PlotManager:
                 residual_base.set_visible(True)
                 self.ax.get_xaxis().set_visible(True)
             elif self.residuals_state == 2:  # Separate subplot
-                self.setup_residual_subplot(window, x_values, masked_residuals, self.residual_thickness,
-                                            scaling_factor=1.0)
+                # Apply same masking to subplot residuals
+                bg_regions = self.get_background_regions(window)
 
+                if bg_regions is not None and len(bg_regions) > 0:
+                    region_mask = np.zeros(len(x_values), dtype=bool)
+                    for bg_start, bg_end in bg_regions:
+                        region_mask |= (x_values >= bg_start) & (x_values <= bg_end)
+
+                    # Only proceed if there are valid data points
+                    if np.any(region_mask):
+                        masked_residuals_subplot = masked_residuals.copy()
+                        masked_residuals_subplot[~region_mask] = np.nan
+                        self.setup_residual_subplot(window, x_values, masked_residuals_subplot, self.residual_thickness,
+                                                    scaling_factor=1.0)
+                    # If no valid points, skip creating the subplot
+                else:
+                    masked_residuals_subplot = masked_residuals
+                    self.setup_residual_subplot(window, x_values, masked_residuals_subplot, self.residual_thickness,
+                                                scaling_factor=1.0)
+
+            # UP TO HERE---------------------------------
             else:
                 self.ax.get_xaxis().set_visible(True)
 
@@ -1466,7 +2015,7 @@ class PlotManager:
         self.canvas.draw_idle()
         return residuals
 
-    def setup_residual_subplot(self, window, x_values, masked_residuals, residual_thickness=1, scaling_factor=1):
+    def setup_residual_subplot_OLD(self, window, x_values, masked_residuals, residual_thickness=1, scaling_factor=1):
         # Create gridspec at start
         gs = self.figure.add_gridspec(20, 1, hspace=0.0)
 
@@ -1522,6 +2071,85 @@ class PlotManager:
 
         self.residuals_subplot.set_xlim(main_xlim[0], main_xlim[1])
 
+
+        # Set subplot to share x axis
+        self.residuals_subplot.sharex(self.ax)
+
+        # Final styling
+        self.residuals_subplot.tick_params(axis='both', labelsize=window.axis_number_size)
+        self.residuals_subplot.grid(True, alpha=0.8)
+        self.residuals_subplot.set_position(gs[18:, 0].get_position(self.figure))
+        self.residuals_subplot.set_visible(True)
+        self.residuals_subplot.yaxis.set_visible(self.y_axis_visible)
+
+    def setup_residual_subplot(self, window, x_values, masked_residuals, residual_thickness=1, scaling_factor=1):
+        # Create gridspec at start
+        gs = self.figure.add_gridspec(20, 1, hspace=0.0)
+
+        if not self.residuals_subplot:
+            self.ax.set_position(gs[0:18, 0].get_position(self.figure))
+            self.residuals_subplot = self.figure.add_subplot(gs[18:, 0])
+
+        self.residuals_subplot.clear()
+
+        # Check if we have any valid (non-NaN) data points
+        scaled_residuals = masked_residuals * scaling_factor
+        if np.all(np.isnan(scaled_residuals)):
+            # All values are NaN - set a default range and return early
+            self.residuals_subplot.set_ylim(-1, 1)
+            self.residuals_subplot.set_ylabel('Res.')
+            return
+
+        # Determine x values based on energy scale
+        x_plot = window.photons - x_values if window.energy_scale == 'KE' else x_values
+
+        # Plot residuals
+        self.residuals_subplot.plot(x_plot, scaled_residuals,
+                                    color=self.residual_color,
+                                    linestyle=self.residual_linestyle,
+                                    alpha=self.residual_alpha,
+                                    linewidth=residual_thickness)
+
+        # Configure main plot
+        self.ax.get_xaxis().set_visible(False)
+
+        sheet_name = window.sheet_combobox.GetValue()
+        is_raman = sheet_name.startswith('RA') or 'RAMAN' in sheet_name.upper()
+
+        # Configure subplot
+        self.residuals_subplot.set_ylabel('Res.')
+        if is_raman:
+            self.residuals_subplot.set_xlabel('Wavenumber (cm$^{-1}$)')
+        elif window.energy_scale == 'KE':
+            self.residuals_subplot.set_xlabel('Kinetic Energy (eV)')
+        else:
+            self.residuals_subplot.set_xlabel('Binding Energy (eV)')
+        # x_label = "Kinetic Energy (eV)" if window.energy_scale == 'KE' else "Binding Energy (eV)"
+        # self.residuals_subplot.set_xlabel(x_label)
+        # self.residuals_subplot.set_xlabel('Binding Energy (eV)')
+        self.residuals_subplot.tick_params(axis='x', bottom=True, labelbottom=True,
+                                           labelsize=window.axis_number_size, pad=8)
+        self.residuals_subplot.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+        self.residuals_subplot.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
+
+        # Set font sizes
+        self.residuals_subplot.xaxis.label.set_size(window.axis_title_size)
+        self.residuals_subplot.yaxis.label.set_size(window.axis_title_size)
+
+        # Set y limits with margin - only use valid (non-NaN) values
+        valid_residuals = masked_residuals[~np.isnan(masked_residuals)]
+        if len(valid_residuals) > 0:
+            y_min, y_max = np.min(valid_residuals), np.max(valid_residuals)
+            margin = 0.1 * (y_max - y_min) if y_max != y_min else 0.1
+            self.residuals_subplot.set_ylim(y_min - margin, y_max + margin)
+        else:
+            # Fallback if somehow we still have no valid residuals
+            self.residuals_subplot.set_ylim(-1, 1)
+
+        # Get current main plot limits
+        main_xlim = self.ax.get_xlim()
+
+        self.residuals_subplot.set_xlim(main_xlim[0], main_xlim[1])
 
         # Set subplot to share x axis
         self.residuals_subplot.sharex(self.ax)
@@ -1763,7 +2391,7 @@ class PlotManager:
         self.fitting_results_text.set_visible(self.fitting_results_visible)
 
 
-    def toggle_legend(self):
+    def toggle_legend_OLD(self):
         self.legend_visible = (self.legend_visible + 1) % 3
         legend = self.ax.get_legend()
         if legend:
@@ -1786,23 +2414,73 @@ class PlotManager:
                                framealpha=0.1, edgecolor='gray')
         self.canvas.draw_idle()
 
+    def toggle_legend(self):
+        self.legend_visible = (self.legend_visible + 1) % 3
 
-    def update_legend(self, window):
+        # Check if any peak has Fermi fitting model
+        handles, labels = self.ax.get_legend_handles_labels()
+        has_fermi_peak = False
+
+        # Quick check by looking for Fermi-specific labels
+        for label in labels:
+            if 'Center:' in label or '16%-84%:' in label:
+                has_fermi_peak = True
+                break
+
+        # If Fermi peak exists, always show full natural legend regardless of mode
+        if has_fermi_peak:
+            legend = self.ax.get_legend()
+            if legend:
+                legend.set_visible(True)  # Always visible when Fermi present
+            return  # Exit early, ignore legend modes
+
+        # ORIGINAL TOGGLE LOGIC (only when no Fermi)
+        legend = self.ax.get_legend()
+        if legend:
+            if self.legend_visible == 0:
+                legend.set_visible(False)
+            elif self.legend_visible == 1:
+                legend.set_visible(True)
+            else:
+                handles, labels = self.ax.get_legend_handles_labels()
+                filtered_handles = []
+                filtered_labels = []
+                for h, l in zip(handles, labels):
+                    if l not in ["Raw Data", "Background", "Overall Fit"]:
+                        clean_label = re.sub(r'\$.*?\$', '', l)
+                        split_label = clean_label.split()
+                        if len(split_label) > 1 and split_label[1].strip():
+                            filtered_handles.append(h)
+                            filtered_labels.append(l)
+                self.ax.legend(filtered_handles, filtered_labels, loc='upper left', frameon=True, fancybox=True,
+                               framealpha=0.1, edgecolor='gray')
+        self.canvas.draw_idle()
+
+    def update_legend_OLD(self, window):
         sheet_name = window.sheet_combobox.GetValue()
         handles, labels = self.ax.get_legend_handles_labels()
+
+        # Extract current core level name for compact legend
+        current_core_level = self.extract_core_level_name(sheet_name)
 
         num_peaks = window.peak_params_grid.GetNumberRows() // 2
         peak_labels = []
         filtered_peak_labels = []
+        compact_peak_labels = []  # Separate list for compact labels
 
         for i in range(num_peaks):
             label = window.peak_params_grid.GetCellValue(i * 2, 1)
             formatted_label = re.sub(r'(\d+/\d+)', r'$_{\1}$', label)
+
+            # Create compact version for peaks-only mode
+            compact_label = self.make_compact_legend_label(formatted_label, current_core_level)
+
             clean_label = re.sub(r'\$.*?\$', '', formatted_label)
             split_label = clean_label.split()
             if len(split_label) > 1 and split_label[1].strip():
                 peak_labels.append(label)
-                filtered_peak_labels.append(formatted_label)
+                filtered_peak_labels.append(formatted_label)  # Full name for full legend
+                compact_peak_labels.append(compact_label)  # Compact name for peaks-only
 
         if self.legend_visible == 2:
             ordered_handles = []
@@ -1811,8 +2489,8 @@ class PlotManager:
                     if label == l:
                         ordered_handles.append(handles[index])
                         break
-            if ordered_handles and filtered_peak_labels:
-                self.ax.legend(ordered_handles, filtered_peak_labels, loc='upper left', frameon=True, fancybox=True,
+            if ordered_handles and compact_peak_labels:
+                self.ax.legend(ordered_handles, compact_peak_labels, loc='upper left', frameon=True, fancybox=True,
                                framealpha=0.1, edgecolor='gray')
             else:
                 self.ax.legend().set_visible(False)
@@ -1833,7 +2511,7 @@ class PlotManager:
                 legend_order2.append("Overall Fit")
 
             legend_order += peak_labels
-            legend_order2 += filtered_peak_labels
+            legend_order2 += filtered_peak_labels  # Use full names for full legend
 
             if legend_order and self.legend_visible:
                 ordered_handles = []
@@ -1850,15 +2528,144 @@ class PlotManager:
 
         self.canvas.draw_idle()
 
-    @staticmethod
-    def format_sheet_name_OLD(sheet_name):
-        import re
-        match = re.match(r'([A-Z][a-z]*)(\d+[spdfg])', sheet_name)
-        if match:
-            element, shell = match.groups()
-            return f"{element} {shell}"
+    def update_legend(self, window):
+        sheet_name = window.sheet_combobox.GetValue()
+        handles, labels = self.ax.get_legend_handles_labels()
+
+        # Check if any peak has Fermi, VBM, or Cut-Off fitting model
+        has_fermi_peak = False
+        has_vbm_peak = False
+        has_cutoff_peak = False
+        num_peaks = window.peak_params_grid.GetNumberRows() // 2
+        for i in range(num_peaks):
+            fitting_model = window.peak_params_grid.GetCellValue(i * 2, 13)  # Column 13 is fitting model
+            if fitting_model == "Fermi":
+                has_fermi_peak = True
+            elif fitting_model == "VBM":
+                has_vbm_peak = True
+            elif fitting_model == "Cut-Off":
+                has_cutoff_peak = True
+
+        # If Fermi, VBM, or Cut-Off peak exists, use natural legend from plot_peak (bypass all modes)
+        if has_fermi_peak or has_vbm_peak or has_cutoff_peak:
+            if handles and labels:
+                self.ax.legend(handles, labels, loc='upper left', frameon=True, fancybox=True,
+                               framealpha=0.1, edgecolor='gray')
+            return  # Exit early, ignore legend modes
+
+        # ORIGINAL LEGEND MODE LOGIC (only when no Fermi or VBM)
+        # Extract current core level name for compact legend
+        current_core_level = self.extract_core_level_name(sheet_name)
+
+        peak_labels = []
+        filtered_peak_labels = []
+        compact_peak_labels = []  # Separate list for compact labels
+
+        for i in range(num_peaks):
+            label = window.peak_params_grid.GetCellValue(i * 2, 1)
+            formatted_label = re.sub(r'(\d+/\d+)', r'$_{\1}$', label)
+
+            # Create compact version for peaks-only mode
+            compact_label = self.make_compact_legend_label(formatted_label, current_core_level)
+
+            clean_label = re.sub(r'\$.*?\$', '', formatted_label)
+            split_label = clean_label.split()
+            if len(split_label) > 1 and split_label[1].strip():
+                peak_labels.append(label)
+                filtered_peak_labels.append(formatted_label)  # Full name for full legend
+                compact_peak_labels.append(compact_label)  # Compact name for peaks-only
+
+        if self.legend_visible == 2:
+            ordered_handles = []
+            for l in peak_labels:
+                for index, label in enumerate(labels):
+                    if label == l:
+                        ordered_handles.append(handles[index])
+                        break
+            if ordered_handles and compact_peak_labels:
+                self.ax.legend(ordered_handles, compact_peak_labels, loc='upper left', frameon=True, fancybox=True,
+                               framealpha=0.1, edgecolor='gray')
+            else:
+                self.ax.legend().set_visible(False)
         else:
-            return sheet_name
+            has_overall_fit = "Overall Fit" in labels
+            has_raw_data = "Raw Data" in labels
+
+            legend_order = []
+            legend_order2 = []
+
+            if has_raw_data:
+                legend_order.append("Raw Data")
+                legend_order2.append("Raw Data")
+            legend_order.append("Background")
+            legend_order2.append("Background")
+            if has_overall_fit:
+                legend_order.append("Overall Fit")
+                legend_order2.append("Overall Fit")
+
+            legend_order += peak_labels
+            legend_order2 += filtered_peak_labels  # Use full names for full legend
+
+            if legend_order and self.legend_visible:
+                ordered_handles = []
+                for l in legend_order:
+                    for index, label in enumerate(labels):
+                        if label == l:
+                            ordered_handles.append(handles[index])
+                            break
+                self.ax.legend(ordered_handles, legend_order2, loc='upper left', frameon=True, fancybox=True,
+                               framealpha=0.1, edgecolor='gray')
+            else:
+                self.ax.legend().remove()
+                self.ax.legend().set_visible(False)
+
+        self.canvas.draw_idle()
+
+    def extract_core_level_name(self, sheet_name):
+        """Extract core level name from sheet name (e.g., 'Sr3d1' -> 'Sr3d', 'C1s1' -> 'C1s')"""
+        import re
+        # Match pattern like C1s, N1s, Sr3d, etc.
+        match = re.match(r'([A-Z][a-z]?\d+[spdf])', sheet_name)
+        if match:
+            return match.group(1)
+        return None
+
+    def make_compact_legend_label(self, original_label, current_core_level):
+        """
+        Make legend labels compact by removing core level prefix if it matches current core level.
+        Handles doublets for p, d, f orbitals.
+        Examples:
+        - If on C1s: "C1s C-C" becomes "C-C"
+        - If on Sr3d: "Sr3d5/2 SrO" becomes "SrO"
+        - If on Sr3d: "Sr3d$_{5/2}$ SrO" becomes "SrO"
+        """
+        import re
+
+        # Skip processing if no current core level
+        if not current_core_level:
+            return original_label
+
+        # For s orbitals (like C1s), check for exact match
+        if current_core_level.endswith('s'):
+            words = original_label.split()
+            if len(words) >= 2 and words[0] == current_core_level:
+                return ' '.join(words[1:])
+
+        # For p, d, f orbitals that can have doublets
+        elif current_core_level[-1] in ['p', 'd', 'f']:
+            # Pattern to match doublet notation: Sr3d5/2, Sr3d3/2, Sr3d$_{5/2}$, Sr3d$_{3/2}$, etc.
+            doublet_pattern = rf'^{re.escape(current_core_level)}(?:\d+/\d+|\$_{{[\d/]+}}\$)\s+(.+)$'
+            match = re.match(doublet_pattern, original_label)
+            if match:
+                return match.group(1)  # Return everything after the doublet part
+
+            # Also check for simple core level match (fallback)
+            words = original_label.split()
+            if len(words) >= 2 and words[0] == current_core_level:
+                return ' '.join(words[1:])
+
+        return original_label
+
 
     @staticmethod
     def format_sheet_name(sheet_name):
@@ -2012,14 +2819,24 @@ class PlotManager:
 
         except Exception as e:
             print("Error in plot_background:", str(e))
-            import traceback
-            traceback.print_exc()
-            wx.MessageBox(str(e), "Error", wx.OK | wx.ICON_ERROR)
+            # import traceback
+            # traceback.print_exc()
+            # wx.MessageBox(str(e), "Error", wx.OK | wx.ICON_ERROR)
 
     def _calculate_adaptive_smart_background(self, window, x_values, y_values, offset_h, offset_l):
         """Helper method to calculate Multi-Regions Smart background."""
         sheet_name = window.sheet_combobox.GetValue()  # Get the current sheet name
-        bg_min_energy, bg_max_energy = min(x_values), max(x_values)
+
+        # Use vline positions instead of min/max of x_values
+        if window.vline1 is not None and window.vline2 is not None:
+            vline1_x = window.vline1.get_xdata()[0]
+            vline2_x = window.vline2.get_xdata()[0]
+            bg_min_energy = min(vline1_x, vline2_x)
+            bg_max_energy = max(vline1_x, vline2_x)
+        else:
+            # Fallback to full range only if no vlines
+            bg_min_energy, bg_max_energy = min(x_values), max(x_values)
+
         window.Data['Core levels'][sheet_name]['Background']['Bkg Low'] = bg_min_energy
         window.Data['Core levels'][sheet_name]['Background']['Bkg High'] = bg_max_energy
 
@@ -2031,8 +2848,11 @@ class PlotManager:
             adaptive_range = (bg_min_energy, bg_max_energy)
 
         current_background = np.array(window.Data['Core levels'][sheet_name]['Background']['Bkg Y'])
+        # Get averaging points from window
+        averaging_points = getattr(window, 'averaging_points', 5)
+
         background_filtered = BackgroundCalculations.calculate_adaptive_smart_background(
-            x_values, y_values, adaptive_range, current_background, offset_h, offset_l
+            x_values, y_values, adaptive_range, current_background, offset_h, offset_l, num_points=averaging_points
         )
         return background_filtered, 'Background'
 
@@ -2042,13 +2862,29 @@ class PlotManager:
 
         # Get the proper energy range from vlines or from stored values
         if window.vline1 is not None and window.vline2 is not None:
-            bg_min_energy = min(window.vline1.get_xdata()[0], window.vline2.get_xdata()[0])
-            bg_max_energy = max(window.vline1.get_xdata()[0], window.vline2.get_xdata()[0])
+            # Convert display positions back to BE for calculations (x_values are always in BE)
+            vline1_be = window.convert_energy_from_display(window.vline1.get_xdata()[0])
+            vline2_be = window.convert_energy_from_display(window.vline2.get_xdata()[0])
+            bg_min_energy = min(vline1_be, vline2_be)
+            bg_max_energy = max(vline1_be, vline2_be)
+
+            # Safety check: ensure the converted range overlaps with actual data
+            data_min = min(x_values)
+            data_max = max(x_values)
+
+            # Clamp the range to actual data bounds to prevent empty arrays
+            bg_min_energy = max(bg_min_energy, data_min)
+            bg_max_energy = min(bg_max_energy, data_max)
+
+            # If range is invalid after clamping, use stored values as fallback
+            if bg_min_energy >= bg_max_energy:
+                bg_min_energy = window.Data['Core levels'][sheet_name]['Background'].get('Bkg Low')
+                bg_max_energy = window.Data['Core levels'][sheet_name]['Background'].get('Bkg High')
         else:
             bg_min_energy = window.Data['Core levels'][sheet_name]['Background'].get('Bkg Low')
             bg_max_energy = window.Data['Core levels'][sheet_name]['Background'].get('Bkg High')
 
-        if bg_min_energy is None or bg_max_energy is None or bg_min_energy > bg_max_energy:
+        if bg_min_energy is None or bg_max_energy is None or bg_min_energy >= bg_max_energy:
             # Default to full range if invalid
             bg_min_energy = min(x_values)
             bg_max_energy = max(x_values)
@@ -2061,59 +2897,72 @@ class PlotManager:
             bg_min_energy = min(x_values)
             bg_max_energy = max(x_values)
 
+        # Create mask and ensure we have at least some data points
         mask = (x_values >= bg_min_energy) & (x_values <= bg_max_energy)
+
+        # Safety check: ensure we have at least 2 data points for background calculation
+        if np.sum(mask) < 2:
+            print(f"Warning: Background range too narrow, using full data range")
+            print(f"Range: {bg_min_energy:.2f} - {bg_max_energy:.2f}")
+            print(f"Data range: {min(x_values):.2f} - {max(x_values):.2f}")
+            mask = np.ones(len(x_values), dtype=bool)  # Use full range
+
         x_values_filtered = x_values[mask]
         y_values_filtered = y_values[mask]
+
+        # Additional safety check
+        if len(x_values_filtered) < 2:
+            print("Error: Still no data points after fallback, using minimal range")
+            # Use first and last points as minimal range
+            mask = np.zeros(len(x_values), dtype=bool)
+            mask[0] = True
+            mask[-1] = True
+            x_values_filtered = x_values[mask]
+            y_values_filtered = y_values[mask]
+
+        # Get averaging points from window
+        averaging_points = getattr(window, 'averaging_points', 5)
 
         if method == "Shirley":
             background_filtered = BackgroundCalculations.calculate_shirley_background(x_values_filtered,
                                                                                       y_values_filtered, offset_h,
-                                                                                      offset_l)
+                                                                                      offset_l, num_points=averaging_points)
             label = 'Background (Shirley)'
         elif method == "Linear":
             background_filtered = BackgroundCalculations.calculate_linear_background(x_values_filtered,
                                                                                      y_values_filtered, offset_h,
-                                                                                     offset_l)
+                                                                                     offset_l, num_points=averaging_points)
             label = 'Background (Linear)'
         elif method in ["Smart", "Multi-Regions Smart", "Multiple Regions Smart"]:
             background_filtered = BackgroundCalculations.calculate_smart_background(x_values_filtered,
                                                                                     y_values_filtered, offset_h,
-                                                                                    offset_l)
+                                                                                    offset_l, num_points=averaging_points)
             label = 'Background (Smart)'
 
-        elif method == "1x U4-Tougaard":
+        elif method == "U4-Tougaard":
             background_filtered = BackgroundCalculations.calculate_tougaard_background(x_values_filtered,
                                                                                        y_values_filtered,
                                                                                        sheet_name,
                                                                                        window)
-            label = 'Background (Tougaard)'
+            label = 'Background (U4-Tougaard)'
+        elif method == "U2-Tougaard":
+            background_filtered = BackgroundCalculations.calculate_u2_tougaard_background(x_values_filtered,
+                                                                                          y_values_filtered,
+                                                                                          sheet_name,
+                                                                                          window)
+            label = 'Background (U2-Tougaard)'
         elif method == "2x U4-Tougaard":
             background_filtered = BackgroundCalculations.calculate_double_tougaard_background(x_values_filtered,
-                                                                                       y_values_filtered,
-                                                                                       sheet_name,
-                                                                                       window)
+                                                                                              y_values_filtered,
+                                                                                              sheet_name,
+                                                                                              window)
             label = 'Background (Tougaard)'
         elif method == "3x U4-Tougaard":
             background_filtered = BackgroundCalculations.calculate_triple_tougaard_background(x_values_filtered,
-                                                                                       y_values_filtered,
-                                                                                       sheet_name,
-                                                                                       window)
+                                                                                              y_values_filtered,
+                                                                                              sheet_name,
+                                                                                              window)
             label = 'Background (Tougaard)'
-        # elif method == "ALS-Raman":
-        #     # Get ALS parameters if available
-        #     lambda_val = 1000
-        #     p_val = 0.01
-        #
-        #     if hasattr(window, 'fitting_window'):
-        #         if hasattr(window.fitting_window, 'als_lambda'):
-        #             lambda_val = float(window.fitting_window.als_lambda.GetValue())
-        #         if hasattr(window.fitting_window, 'als_p'):
-        #             p_val = float(window.fitting_window.als_p.GetValue())
-        #
-        #     background_filtered = BackgroundCalculations.calculate_als_background(
-        #         x_values_filtered, y_values_filtered, lambda_val=lambda_val, p=p_val
-        #     )
-        #     label = 'Background (ALS)'
         elif method == "ALS-Raman":
             # Get ALS parameters if available
             lambda_val = 1e5
@@ -2135,7 +2984,6 @@ class PlotManager:
                                                                                     y_values_filtered, offset_h,
                                                                                     offset_l)
             label = 'Background (Smart)'
-            # raise ValueError(f"Unknown background method: {method}")
 
         new_background = np.array(window.Data['Core levels'][sheet_name]['Background']['Bkg Y'])
         new_background[mask] = background_filtered
@@ -2143,13 +2991,25 @@ class PlotManager:
 
     def _update_background_data(self, window, sheet_name, x_values, background, method, offset_h, offset_l):
         """Helper method to update the background data in window.Data."""
+
+        # Use vline positions instead of min/max of x_values
+        if window.vline1 is not None and window.vline2 is not None:
+            vline1_x = window.vline1.get_xdata()[0]
+            vline2_x = window.vline2.get_xdata()[0]
+            bg_low = round(min(vline1_x, vline2_x),2)
+            bg_high = round(max(vline1_x, vline2_x),2)
+        else:
+            # Fallback to full range only if no vlines
+            bg_low = round(min(x_values),2)
+            bg_high = round(max(x_values),2)
+
         window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = background.tolist()
         window.background = background
         window.Data['Core levels'][sheet_name]['Background'].update({
             'Bkg Y': background.tolist(),
             'Bkg Type': method,
-            'Bkg Low': min(x_values),
-            'Bkg High': max(x_values),
+            'Bkg Low': bg_low,
+            'Bkg High': bg_high,
             'Bkg Offset Low': offset_l,
             'Bkg Offset High': offset_h,
             'Bkg X': x_values.tolist()
@@ -2285,6 +3145,32 @@ class PlotManager:
 
             # Force canvas update
             window.canvas.draw_idle()
+
+    def get_background_regions(self, window):
+        """Get background regions from recorded ranges in window.Data"""
+        bg_regions = []
+        try:
+            sheet_name = window.sheet_combobox.GetValue()
+            if (sheet_name in window.Data['Core levels'] and
+                    'Background' in window.Data['Core levels'][sheet_name] and
+                    'Recorded_Ranges' in window.Data['Core levels'][sheet_name]['Background']):
+
+                recorded_ranges = window.Data['Core levels'][sheet_name]['Background']['Recorded_Ranges']
+
+                for range_data in recorded_ranges:
+                    if len(range_data) >= 4:  # (offset_h, offset_l, min_range, max_range)
+                        offset_h, offset_l, min_range, max_range = range_data[:4]
+                        try:
+                            min_range = float(min_range)
+                            max_range = float(max_range)
+                            bg_regions.append((min(min_range, max_range), max(min_range, max_range)))
+                        except (ValueError, TypeError):
+                            continue
+        except:
+            pass
+
+        # Return None if no valid regions found (means show everything)
+        return bg_regions if bg_regions else None
 # --------------------- HISTORY --------------------------------------------------------------------
 # --------------------------------------------------------------------------------------------------
 

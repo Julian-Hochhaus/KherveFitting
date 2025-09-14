@@ -124,6 +124,9 @@ class MyFrame(wx.Frame):
         self.peak_fitting_tab_selected = False
         self.fitting_window = None
 
+        # Area selected
+        self.area_tab_selected = False
+
         self.noise_analysis_window = None
         self.noise_tab_selected = False
 
@@ -166,6 +169,8 @@ class MyFrame(wx.Frame):
         # Initialize variables for vertical lines and background energy
         self.vline1 = None
         self.vline2 = None
+        self.vline1_text = None
+        self.vline2_text = None
         self.active_vline = None
         self.vline_drag_threshold = 5  # pixels
 
@@ -447,7 +452,7 @@ class MyFrame(wx.Frame):
             new_sash_position = self.initial_sash_position
             new_bmp = wx.ArtProvider.GetBitmap(wx.ART_GO_BACK, wx.ART_TOOLBAR)
             self.is_right_panel_hidden = False
-            self.SetMinSize((800, 600))  # Reset min size to allow resizing
+            self.SetMinSize((750, 600))  # Reset min size to allow resizing
             self.SetMaxSize((-1, -1))
             # Restore previous size
             if hasattr(self, 'previous_size'):
@@ -491,7 +496,8 @@ class MyFrame(wx.Frame):
 
             # Store current size and set to fixed width of 865
             self.previous_size = current_size
-            fixed_width = 865
+            # fixed_width = 865
+            fixed_width = 750
             fixed_height = current_size.height
 
             # Fix both width and height
@@ -642,7 +648,8 @@ class MyFrame(wx.Frame):
 
             # Rebind events
             from libraries.FileMenu.Open import open_xlsx_file
-            from Functions import on_save, refresh_sheets, save_all_sheets_with_plots
+            from Functions import on_save
+            from libraries.FileMenu.Save import refresh_sheets, save_all_sheets_with_plots
             from libraries.Sheet_Operations import on_sheet_selected
             from libraries.Utilities import on_delete_sheet, copy_sheet, JoinSheetsWindow
 
@@ -701,17 +708,14 @@ class MyFrame(wx.Frame):
 
 
 
-
-
-
-
-
-
     def number_to_letter(n):
         return chr(65 + n)  # 65 is the ASCII value for 'A'
 
-
     def on_open_background_window(self):
+        # Close fitting window if it's open (using exact same pattern)
+        if hasattr(self, 'fitting_window') and self.fitting_window is not None:
+            self.fitting_window.Close()
+
         if not hasattr(self, 'background_window') or not self.background_window:
             self.background_window = BackgroundWindow(self)
 
@@ -724,18 +728,99 @@ class MyFrame(wx.Frame):
             y = main_pos.y + (main_size.height - bg_size.height) // 2
 
             self.background_window.SetPosition((x, y))
-
-            self.background_tab_selected = True
             self.background_window.Bind(wx.EVT_CLOSE, self.on_background_window_close)
+
+        # Enable area interaction (similar to how fitting screen works)
+        self.enable_area_interaction()
+
         self.background_window.Show()
         self.background_window.Raise()
 
+
     def on_background_window_close(self, event):
+        """Handle area screen window closing - robust cleanup."""
         save_state(self)
-        self.background_tab_selected = False
-        self.show_hide_vlines()
+
+        # Disable area interaction (similar to how fitting screen works)
+        self.disable_area_interaction()
+
+        # Clear window reference
         self.background_window = None
         event.Skip()
+
+    def cleanup_area_vlines(self):
+        """Completely clean up all area screen vlines and text - only when closing."""
+        # Only clean up if area screen is actually being closed
+        if not (hasattr(self, 'area_tab_selected') and self.area_tab_selected):
+            # Remove vlines from plot
+            if self.vline1 is not None:
+                try:
+                    self.vline1.remove()
+                except:
+                    pass
+                self.vline1 = None
+
+            if self.vline2 is not None:
+                try:
+                    self.vline2.remove()
+                except:
+                    pass
+                self.vline2 = None
+
+            # Remove text labels
+            if hasattr(self, 'vline1_text') and self.vline1_text is not None:
+                try:
+                    self.vline1_text.remove()
+                except:
+                    pass
+                self.vline1_text = None
+
+            if hasattr(self, 'vline2_text') and self.vline2_text is not None:
+                try:
+                    self.vline2_text.remove()
+                except:
+                    pass
+                self.vline2_text = None
+            # Clean up center vline
+            if hasattr(self, 'vline_center') and self.vline_center is not None:
+                try:
+                    self.vline_center.remove()
+                except:
+                    pass
+                self.vline_center = None
+            if hasattr(self, 'vline_center_text') and self.vline_center_text is not None:
+                try:
+                    self.vline_center_text.remove()
+                except:
+                    pass
+                self.vline_center_text = None
+
+    def ensure_area_vlines_visible(self):
+        """Ensure area screen vlines are visible and properly initialized."""
+        if (hasattr(self, 'background_window') and self.background_window is not None and
+                hasattr(self, 'area_tab_selected') and self.area_tab_selected):
+
+            # Force recreation of vlines
+            if hasattr(self.background_window, 'initialize_or_restore_area_vlines'):
+                self.background_window.initialize_or_restore_area_vlines()
+
+            # Force canvas update
+            self.canvas.draw_idle()
+
+            # Update range controls
+            if hasattr(self.background_window, 'update_range_controls_from_data'):
+                wx.CallAfter(self.background_window.update_range_controls_from_data)
+
+    def enable_area_interaction(self):
+        """Enable area screen interaction - similar to enable_background_interaction."""
+        self.area_tab_selected = True
+        self.show_hide_vlines()
+
+    def disable_area_interaction(self):
+        """Disable area screen interaction - similar to disable_background_interaction."""
+        self.cleanup_area_vlines()
+        self.area_tab_selected = False
+        self.show_hide_vlines()
 
     def enable_background_interaction(self):
         self.background_tab_selected = True
@@ -749,10 +834,14 @@ class MyFrame(wx.Frame):
         self.background_tab_selected = False
         self.show_hide_vlines()
 
-    def on_open_fitting_window(self):
+    def on_open_fitting_window(self, normal=True):
+        # Close background window if it's open (using exact same pattern)
+        if hasattr(self, 'background_window') and self.background_window is not None:
+            self.background_window.Close()
+
         save_state(self)
         if self.fitting_window is None or not self.fitting_window:
-            self.fitting_window = FittingWindow(self)
+            self.fitting_window = FittingWindow(self, normal)
             self.background_tab_selected = True
             self.peak_fitting_tab_selected = False
 
@@ -767,11 +856,27 @@ class MyFrame(wx.Frame):
 
             self.fitting_window.SetPosition((x, y))
 
+            # Bind the close event (missing from original code)
+            self.fitting_window.Bind(wx.EVT_CLOSE, self.on_fitting_window_close)
+
             self.show_hide_vlines()
             self.peak_manipulation.deselect_all_peaks()
 
         self.fitting_window.Show()
         self.fitting_window.Raise()  # Bring the window to the front
+
+    def on_fitting_window_close(self, event):
+        """Handle fitting screen window closing - robust cleanup."""
+        save_state(self)
+
+        # Reset fitting states
+        self.background_tab_selected = False
+        self.peak_fitting_tab_selected = False
+        self.peak_manipulation.deselect_all_peaks()
+
+        # Clear window reference
+        self.fitting_window = None
+        event.Skip()
 
     def on_open_noise_analysis_window(self, event):
         if self.noise_analysis_window is None or not self.noise_analysis_window:
@@ -822,6 +927,16 @@ class MyFrame(wx.Frame):
     def adjust_plot_limits(self, axis, direction):
         self.plot_config.adjust_plot_limits(self, axis, direction)
 
+        # canvas.draw_idle()
+        self.canvas.draw_idle()
+
+        # Refresh vline text labels after plot adjustment
+        self.refresh_vline_text_labels()
+
+        # Update averaging indicator lines after plot adjustment
+        if hasattr(self, 'add_averaging_indicator_lines'):
+            self.add_averaging_indicator_lines()
+
     def update_constraint(self, event):
         row = event.GetRow()
         col = event.GetCol()
@@ -868,7 +983,7 @@ class MyFrame(wx.Frame):
                 linked_peaks.append(i)
         return linked_peaks
 
-    def update_linked_peak(self, peak_index, new_x, new_height, area=None, original_peak_index=None):
+    def update_linked_peak_OLD(self, peak_index, new_x, new_height, area=None, original_peak_index=None):
         row = peak_index * 2
         constraint_row = row + 1
         position_constraint = self.peak_params_grid.GetCellValue(constraint_row, 2)
@@ -934,7 +1049,7 @@ class MyFrame(wx.Frame):
                 peaks[peak_label]['Height'] = new_linked_height
         elif height_constraint.startswith(original_peak_letter):
             # Check if model uses height as primary parameter
-            height_based_models = ["GL (Height)", "SGL (Height)", "D-parameter"]
+            height_based_models = ["GL (Height)", "SGL (Height)", "D-parameter", "Fermi"]
 
             if fitting_model in height_based_models:
                 # Only update height for height-based models
@@ -963,8 +1078,217 @@ class MyFrame(wx.Frame):
         if not ("LA" in fitting_model or "GL (Area)" in fitting_model or "Voigt" in fitting_model or "ExpGauss" in fitting_model) and area_constraint.startswith(original_peak_letter):
             self.recalculate_peak_area(peak_index)
 
+    def update_linked_peak(self, peak_index, new_x, new_height, area=None, original_peak_index=None):
+        row = peak_index * 2
+        constraint_row = row + 1
+        position_constraint = self.peak_params_grid.GetCellValue(constraint_row, 2)
+        height_constraint = self.peak_params_grid.GetCellValue(constraint_row, 3)
+        area_constraint = self.peak_params_grid.GetCellValue(constraint_row, 6)
 
+        sheet_name = self.sheet_combobox.GetValue()
+        peak_label = self.peak_params_grid.GetCellValue(row, 1)
+        peaks = self.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+        fitting_model = self.peak_params_grid.GetCellValue(row, 13)
 
+        original_peak_letter = chr(65 + original_peak_index)
+
+        # EXISTING CODE - Update position if constrained (same as original)
+        if position_constraint.startswith(original_peak_letter):
+            if '+' in position_constraint:
+                offset = float(position_constraint.split('+')[1].split('#')[0])
+                new_position = new_x + offset
+            elif '-' in position_constraint:
+                offset = float(position_constraint.split('-')[1].split('#')[0])
+                new_position = new_x - offset
+            elif '*' in position_constraint:
+                factor = float(position_constraint.split('*')[1].split('#')[0])
+                new_position = new_x * factor
+            elif '/' in position_constraint:
+                factor = float(position_constraint.split('/')[1].split('#')[0])
+                new_position = new_x / factor
+            else:
+                new_position = new_x
+
+            self.peak_params_grid.SetCellValue(row, 2, f"{new_position:.2f}")
+            if peak_label in peaks:
+                peaks[peak_label]['Position'] = new_position
+
+        # NEW CODE - Handle cross-core-level position constraints
+        elif '_' in position_constraint:
+            new_position = self.evaluate_cross_core_constraint(position_constraint, 'Position')
+            if new_position is not None:
+                self.peak_params_grid.SetCellValue(row, 2, f"{new_position:.2f}")
+                if peak_label in peaks:
+                    peaks[peak_label]['Position'] = new_position
+
+        # EXISTING CODE - Area constraints
+        if (("LA" in fitting_model or "GL (Area)" in fitting_model or "Voigt" in fitting_model or "ExpGauss" in
+             fitting_model) or "DS" in fitting_model) and area_constraint.startswith(
+            original_peak_letter):
+            current_area = float(self.peak_params_grid.GetCellValue(original_peak_index * 2, 6))
+            if '*' in area_constraint:
+                factor = float(area_constraint.split('*')[1].split('#')[0])
+                new_linked_area = current_area * factor
+            elif '/' in area_constraint:
+                factor = float(area_constraint.split('/')[1].split('#')[0])
+                new_linked_area = current_area / factor
+            elif '+' in area_constraint:
+                offset = float(area_constraint.split('+')[1].split('#')[0])
+                new_linked_area = current_area + offset
+            elif '-' in area_constraint:
+                offset = float(area_constraint.split('-')[1].split('#')[0])
+                new_linked_area = current_area - offset
+            else:
+                new_linked_area = current_area
+
+            self.peak_params_grid.SetCellValue(row, 6, f"{new_linked_area:.2f}")
+
+            # Recalculate height from area
+            fwhm = float(self.peak_params_grid.GetCellValue(row, 4))
+            new_linked_height = self.calculate_height_from_area(new_linked_area, fwhm, fitting_model, row)
+            self.peak_params_grid.SetCellValue(row, 3, f"{new_linked_height:.2f}")
+
+            if peak_label in peaks:
+                peaks[peak_label]['Area'] = new_linked_area
+                peaks[peak_label]['Height'] = new_linked_height
+
+        # NEW CODE - Handle cross-core-level area constraints
+        elif (("LA" in fitting_model or "GL (Area)" in fitting_model or "Voigt" in fitting_model or "ExpGauss" in
+               fitting_model) or "DS" in fitting_model) and '_' in area_constraint:
+            new_linked_area = self.evaluate_cross_core_constraint(area_constraint, 'Area')
+            if new_linked_area is not None:
+                self.peak_params_grid.SetCellValue(row, 6, f"{new_linked_area:.2f}")
+
+                # Recalculate height from area
+                fwhm = float(self.peak_params_grid.GetCellValue(row, 4))
+                new_linked_height = self.calculate_height_from_area(new_linked_area, fwhm, fitting_model, row)
+                self.peak_params_grid.SetCellValue(row, 3, f"{new_linked_height:.2f}")
+
+                if peak_label in peaks:
+                    peaks[peak_label]['Area'] = new_linked_area
+                    peaks[peak_label]['Height'] = new_linked_height
+
+        # EXISTING CODE - Height constraints
+        elif height_constraint.startswith(original_peak_letter):
+            # Check if model uses height as primary parameter
+            height_based_models = ["GL (Height)", "SGL (Height)", "D-parameter", "Fermi"]
+
+            if fitting_model in height_based_models:
+                # Only update height for height-based models
+                if '*' in height_constraint:
+                    factor = float(height_constraint.split('*')[1].split('#')[0])
+                    new_linked_height = new_height * factor
+                elif '/' in height_constraint:
+                    factor = float(height_constraint.split('/')[1].split('#')[0])
+                    new_linked_height = new_height / factor
+                elif '+' in height_constraint:
+                    offset = float(height_constraint.split('+')[1].split('#')[0])
+                    new_linked_height = new_height + offset
+                elif '-' in height_constraint:
+                    offset = float(height_constraint.split('-')[1].split('#')[0])
+                    new_linked_height = new_height - offset
+                else:
+                    new_linked_height = new_height
+
+                self.peak_params_grid.SetCellValue(row, 3, f"{new_linked_height:.2f}")
+                if peak_label in peaks:
+                    peaks[peak_label]['Height'] = new_linked_height
+
+        # NEW CODE - Handle cross-core-level height constraints
+        elif '_' in height_constraint:
+            height_based_models = ["GL (Height)", "SGL (Height)", "D-parameter", "Fermi"]
+            if fitting_model in height_based_models:
+                new_linked_height = self.evaluate_cross_core_constraint(height_constraint, 'Height')
+                if new_linked_height is not None:
+                    self.peak_params_grid.SetCellValue(row, 3, f"{new_linked_height:.2f}")
+                    if peak_label in peaks:
+                        peaks[peak_label]['Height'] = new_linked_height
+
+        # EXISTING CODE - Recalculate area if not LA model
+        # if not "LA" in fitting_model:
+        if not (
+                "LA" in fitting_model or "GL (Area)" in fitting_model or "Voigt" in fitting_model or "ExpGauss" in fitting_model) and area_constraint.startswith(
+                original_peak_letter):
+            self.recalculate_peak_area(peak_index)
+
+        # NEW CODE - Recalculate area for cross-core-level constraints
+        elif not (
+                "LA" in fitting_model or "GL (Area)" in fitting_model or "Voigt" in fitting_model or "ExpGauss" in fitting_model) and '_' in area_constraint:
+            self.recalculate_peak_area(peak_index)
+
+    def get_cross_core_level_value(self, core_level_ref, param_type):
+        """Get parameter value from another core level"""
+        try:
+            if '_' not in core_level_ref:
+                return None
+
+            core_level_name, peak_letter = core_level_ref.split('_', 1)
+            peak_index = ord(peak_letter) - ord('A')
+
+            if core_level_name not in self.Data['Core levels']:
+                return None
+
+            core_level_data = self.Data['Core levels'][core_level_name]
+
+            if 'Fitting' not in core_level_data or 'Peaks' not in core_level_data['Fitting']:
+                return None
+
+            peaks = core_level_data['Fitting']['Peaks']
+            peak_keys = list(peaks.keys())
+
+            if peak_index >= len(peak_keys):
+                return None
+
+            peak_key = peak_keys[peak_index]
+            peak_data = peaks[peak_key]
+
+            # ADD THIS MAPPING - same as Functions.py version
+            param_map = {
+                'center': 'Position', 'Position': 'Position',
+                'height': 'Height', 'Height': 'Height',
+                'area': 'Area', 'Area': 'Area',
+                'fwhm': 'FWHM', 'FWHM': 'FWHM',
+                'sigma': 'Sigma', 'Sigma': 'Sigma',
+                'gamma': 'Gamma', 'Gamma': 'Gamma',
+                'skew': 'Skew', 'Skew': 'Skew'
+            }
+
+            actual_param = param_map.get(param_type, param_type)
+            if actual_param in peak_data:
+                return float(peak_data[actual_param])
+
+            return None
+
+        except (ValueError, IndexError, KeyError):
+            return None
+
+    def evaluate_cross_core_constraint(self, constraint_str, param_type):
+        """Evaluate constraints that reference other core levels"""
+        import re
+
+        pattern = r'^([^_]+_[A-P])([+\-*/])([0-9]*\.?[0-9]+)(?:#([0-9]*\.?[0-9]+))?$'
+        match = re.match(pattern, constraint_str)
+
+        if not match:
+            return None
+
+        core_level_ref, operator, value_str, error_str = match.groups()
+        value = float(value_str)
+
+        ref_value = self.get_cross_core_level_value(core_level_ref, param_type)
+        if ref_value is None:
+            return None
+
+        if operator == '*':
+            return ref_value * value
+        elif operator == '/':
+            return ref_value / value if value != 0 else ref_value
+        elif operator == '+':
+            return ref_value + value
+        elif operator == '-':
+            return ref_value - value
+
+        return None
 
     def calculate_height_from_area(self, area, fwhm, model, row=None):
         if model in ["Voigt (Area, L/G, \u03c3)", "Voigt (Area, \u03c3, \u03b3)"]:
@@ -1074,7 +1398,7 @@ class MyFrame(wx.Frame):
             sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
             gamma = fwhm / 2
             return area / ((1 - fraction / 100) * sigma * np.sqrt(2 * np.pi) + (fraction / 100) * np.pi * gamma)
-        elif model == "D-parameter":
+        elif model in ["D-parameter", "Fermi"]:
             # D-parameter doesn't have an area
             return 0.0
 
@@ -1352,7 +1676,7 @@ class MyFrame(wx.Frame):
             gamma = float(self.peak_params_grid.GetCellValue(row, 8))
             skew = float(self.peak_params_grid.GetCellValue(row, 9))
             area = self.calculate_peak_area(model, height, fwhm, fraction, sigma, gamma, skew)
-        elif model == "D-parameter":
+        elif model in ["D-parameter"," Fermi"]:
             return
         else:
             area = self.calculate_peak_area(model, height, fwhm, fraction)
@@ -1367,27 +1691,66 @@ class MyFrame(wx.Frame):
 
         return area
 
+
     def show_hide_vlines(self):
+        """Show/hide vlines based on current screen state and zoom/drag modes."""
         # Hide vlines if zooming or dragging
         if self.zoom_mode or self.drag_mode:
             if self.vline1 is not None:
                 self.vline1.set_visible(False)
             if self.vline2 is not None:
                 self.vline2.set_visible(False)
+            if hasattr(self, 'vline1_text') and self.vline1_text is not None:
+                self.vline1_text.set_visible(False)
+            if hasattr(self, 'vline2_text') and self.vline2_text is not None:
+                self.vline2_text.set_visible(False)
             if self.vline3 is not None:
                 self.vline3.set_visible(False)
             if self.vline4 is not None:
                 self.vline4.set_visible(False)
+            if hasattr(self, 'vline_center') and self.vline_center is not None:
+                self.vline_center.set_visible(False)
+            if hasattr(self, 'vline_center_text') and self.vline_center_text is not None:
+                self.vline_center_text.set_visible(False)
             return
 
-        # Existing visibility logic
-        background_lines_visible = hasattr(self, 'fitting_window') and self.background_tab_selected
-        noise_lines_visible = self.noise_analysis_window is not None and self.noise_tab_selected
+        # Check if either fitting screen OR area screen is open and active
+        fitting_screen_active = (hasattr(self, 'fitting_window') and
+                                 self.fitting_window is not None and
+                                 hasattr(self, 'background_tab_selected') and
+                                 self.background_tab_selected)
 
+        area_screen_active = (hasattr(self, 'background_window') and
+                              self.background_window is not None and
+                              hasattr(self, 'area_tab_selected') and
+                              self.area_tab_selected)
+
+        # Background lines (vline1, vline2) should be visible if EITHER screen is active
+        background_lines_visible = fitting_screen_active or area_screen_active
+
+        # RESTORE INITIALIZATION LOGIC FOR DRAGGING TO WORK:
+        # Initialize or restore vlines if fitting screen background tab is selected and they don't exist
+        if fitting_screen_active and (self.vline1 is None or self.vline2 is None):
+            self.initialize_or_restore_background_vlines()
+        # Initialize or restore vlines if area screen is open and they don't exist
+        elif area_screen_active and (self.vline1 is None or self.vline2 is None):
+            if hasattr(self.background_window, 'initialize_or_restore_area_vlines'):
+                self.background_window.initialize_or_restore_area_vlines()
+
+        # Set visibility for background vlines (vline1 and vline2)
         if self.vline1 is not None:
             self.vline1.set_visible(background_lines_visible)
         if self.vline2 is not None:
             self.vline2.set_visible(background_lines_visible)
+        if hasattr(self, 'vline1_text') and self.vline1_text is not None:
+            self.vline1_text.set_visible(background_lines_visible)
+        if hasattr(self, 'vline2_text') and self.vline2_text is not None:
+            self.vline2_text.set_visible(background_lines_visible)
+
+        # Noise lines visibility (only for fitting screen)
+        noise_lines_visible = (self.noise_analysis_window is not None and
+                               hasattr(self, 'noise_tab_selected') and
+                               self.noise_tab_selected)
         if self.vline3 is not None:
             self.vline3.set_visible(noise_lines_visible)
         if self.vline4 is not None:
@@ -1395,22 +1758,369 @@ class MyFrame(wx.Frame):
 
         self.canvas.draw_idle()
 
+    def update_area_screen_range_controls(self):
+        """Update area screen range controls when vlines move."""
+        if (hasattr(self, 'background_window') and self.background_window is not None and
+                hasattr(self.background_window, 'update_range_controls_from_data')):
+            self.background_window.update_range_controls_from_data()
+
+    def initialize_or_restore_background_vlines(self):
+        """Initialize vertical lines at 1/15 and 14/15 of the plot for background fitting, or restore from saved positions."""
+        if len(self.x_values) > 0:
+            sheet_name = self.sheet_combobox.GetValue()
+
+            # Remove any existing vlines and their text first to prevent duplicates
+            if self.vline1 is not None:
+                try:
+                    self.vline1.remove()
+                except:
+                    pass
+                self.vline1 = None
+            if self.vline2 is not None:
+                try:
+                    self.vline2.remove()
+                except:
+                    pass
+                self.vline2 = None
+            if self.vline1_text is not None:
+                try:
+                    self.vline1_text.remove()
+                except:
+                    pass
+                self.vline1_text = None
+            if self.vline2_text is not None:
+                try:
+                    self.vline2_text.remove()
+                except:
+                    pass
+                self.vline2_text = None
+            # Remove existing center text if any
+            if hasattr(self, 'vline_center_text') and self.vline_center_text is not None:
+                try:
+                    self.vline_center_text.remove()
+                except:
+                    pass
+                self.vline_center_text = None
+
+
+            # Priority 1: Try to get values from peak fitting grid first (if it exists and has non-zero values)
+            grid_low = None
+            grid_high = None
+            if (hasattr(self, 'peak_params_grid') and self.peak_params_grid is not None and
+                    self.peak_params_grid.GetNumberRows() > 0):
+                try:
+                    grid_low_str = self.peak_params_grid.GetCellValue(0, 15)  # Bkg Low column
+                    grid_high_str = self.peak_params_grid.GetCellValue(0, 16)  # Bkg High column
+
+                    # Check if values are not empty and not "0" (or "0.00")
+                    if (grid_low_str and grid_high_str and
+                            grid_low_str.strip() != '' and grid_high_str.strip() != '' and
+                            float(grid_low_str) != 0 and float(grid_high_str) != 0):
+                        grid_low = float(grid_low_str)
+                        grid_high = float(grid_high_str)
+                except (ValueError, IndexError):
+                    grid_low = None
+                    grid_high = None
+
+            # Priority 2: Try to get saved positions from background data structure
+            saved_low = None
+            saved_high = None
+            if sheet_name in self.Data['Core levels'] and 'Background' in self.Data['Core levels'][sheet_name]:
+                bg_data = self.Data['Core levels'][sheet_name]['Background']
+                saved_low = bg_data.get('Bkg Low')
+                saved_high = bg_data.get('Bkg High')
+
+            # Use grid values if available and valid
+            if grid_low is not None and grid_high is not None:
+                vline1_pos = float(grid_low)
+                vline2_pos = float(grid_high)
+            # Otherwise use saved positions if valid
+            elif (saved_low is not None and saved_high is not None and
+                  saved_low != saved_high and
+                  saved_low != '' and saved_high != '' and
+                  str(saved_low).strip() != '' and str(saved_high).strip() != ''):
+                # Use saved positions - safely convert to float
+                try:
+                    vline1_pos = float(saved_low)
+                    vline2_pos = float(saved_high)
+                except (ValueError, TypeError):
+                    # Fallback to default positions if conversion fails
+                    x_min = min(self.x_values)
+                    x_max = max(self.x_values)
+                    x_range = x_max - x_min
+                    vline1_pos = x_min + x_range / 15
+                    vline2_pos = x_min + 14 * x_range / 15
+            else:
+                # Priority 3: Use default 1/15 and 14/15 positions
+                x_min = min(self.x_values)
+                x_max = max(self.x_values)
+                x_range = x_max - x_min
+                vline1_pos = x_min + x_range / 15
+                vline2_pos = x_min + 14 * x_range / 15
+
+            # Convert BE positions to display positions
+            vline1_display = self.convert_energy_for_display(vline1_pos)
+            vline2_display = self.convert_energy_for_display(vline2_pos)
+
+            # Create new vlines with converted positions
+            self.vline1 = self.ax.axvline(vline1_display, color='r', linestyle='--', alpha=0.7)
+            self.vline2 = self.ax.axvline(vline2_display, color='r', linestyle='--', alpha=0.7)
+
+            # Add text labels for vlines
+            self.add_vline_text_labels()
+
+            # Add averaging indicator lines
+            if hasattr(self, 'add_averaging_indicator_lines'):
+                self.add_averaging_indicator_lines()
+
+            # Update data structure
+            if sheet_name in self.Data['Core levels']:
+                if 'Background' not in self.Data['Core levels'][sheet_name]:
+                    self.Data['Core levels'][sheet_name]['Background'] = {}
+                self.Data['Core levels'][sheet_name]['Background']['Bkg Low'] = float(min(vline1_pos, vline2_pos))
+                self.Data['Core levels'][sheet_name]['Background']['Bkg High'] = float(max(vline1_pos, vline2_pos))
+
+    def add_vline_text_labels_OLD_KE(self):
+        """Add text labels to vertical lines showing their BE values."""
+        if self.vline1 is not None and self.vline2 is not None:
+            # Get y-axis range for positioning
+            y_min, y_max = self.ax.get_ylim()
+            y_range = y_max - y_min
+
+            # Get vline positions and round to 2 digits
+            vline1_x = round(self.vline1.get_xdata()[0], 2)
+            vline2_x = round(self.vline2.get_xdata()[0], 2)
+
+            # Determine which is high BE and which is low BE
+            if vline1_x > vline2_x:
+                high_be_x, low_be_x = vline1_x, vline2_x
+                high_be_vline, low_be_vline = 'vline1', 'vline2'
+            else:
+                high_be_x, low_be_x = vline2_x, vline1_x
+                high_be_vline, low_be_vline = 'vline2', 'vline1'
+
+            # Position high BE text at 90% of Y axis
+            high_be_text_y = y_min + 0.9 * y_range
+            # Position low BE text 10% lower (80% of Y axis)
+            low_be_text_y = y_min + 0.8 * y_range
+
+            # Remove existing text if any
+            if self.vline1_text is not None:
+                try:
+                    self.vline1_text.remove()
+                except:
+                    pass
+            if self.vline2_text is not None:
+                try:
+                    self.vline2_text.remove()
+                except:
+                    pass
+
+            # Create text labels with appropriate heights
+            if high_be_vline == 'vline1':
+                self.vline1_text = self.ax.text(vline1_x, high_be_text_y, f'{vline1_x:.2f}',
+                                                ha='center', va='center',
+                                                color='grey', fontsize=10,
+                                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+                self.vline2_text = self.ax.text(vline2_x, low_be_text_y, f'{vline2_x:.2f}',
+                                                ha='center', va='center',
+                                                color='grey', fontsize=10,
+                                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+            else:
+                self.vline1_text = self.ax.text(vline1_x, low_be_text_y, f'{vline1_x:.2f}',
+                                                ha='center', va='center',
+                                                color='grey', fontsize=10,
+                                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+                self.vline2_text = self.ax.text(vline2_x, high_be_text_y, f'{vline2_x:.2f}',
+                                                ha='center', va='center',
+                                                color='grey', fontsize=10,
+                                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+
+    def add_vline_text_labels(self):
+        """Add text labels to vertical lines showing their values in current energy scale."""
+        if self.vline1 is not None and self.vline2 is not None:
+            # Get y-axis range for positioning
+            y_min, y_max = self.ax.get_ylim()
+            y_range = y_max - y_min
+
+            # Get vline positions (these are in display coordinates)
+            vline1_x = round(self.vline1.get_xdata()[0], 2)
+            vline2_x = round(self.vline2.get_xdata()[0], 2)
+
+            # Determine which is high energy and which is low energy in display scale
+            if self.energy_scale == 'KE':
+                # In KE mode, higher KE appears on right, lower KE on left
+                if vline1_x > vline2_x:
+                    high_energy_x, low_energy_x = vline1_x, vline2_x
+                    high_energy_text_y = y_min + 0.9 * y_range
+                    low_energy_text_y = y_min + 0.8 * y_range
+                else:
+                    high_energy_x, low_energy_x = vline2_x, vline1_x
+                    high_energy_text_y = y_min + 0.9 * y_range
+                    low_energy_text_y = y_min + 0.8 * y_range
+            else:
+                # In BE mode, higher BE appears on right, lower BE on left
+                if vline1_x > vline2_x:
+                    high_energy_x, low_energy_x = vline1_x, vline2_x
+                    high_energy_text_y = y_min + 0.9 * y_range
+                    low_energy_text_y = y_min + 0.8 * y_range
+                else:
+                    high_energy_x, low_energy_x = vline2_x, vline1_x
+                    high_energy_text_y = y_min + 0.9 * y_range
+                    low_energy_text_y = y_min + 0.8 * y_range
+
+            # Remove existing text if any
+            if self.vline1_text is not None:
+                try:
+                    self.vline1_text.remove()
+                except:
+                    pass
+            if self.vline2_text is not None:
+                try:
+                    self.vline2_text.remove()
+                except:
+                    pass
+            # Remove existing center text if any
+            if hasattr(self, 'vline_center_text') and self.vline_center_text is not None:
+                try:
+                    self.vline_center_text.remove()
+                except:
+                    pass
+                self.vline_center_text = None
+
+            # Create text labels
+            energy_unit = "KE" if self.energy_scale == 'KE' else "BE"
+
+            self.vline1_text = self.ax.text(vline1_x,
+                                            high_energy_text_y if vline1_x == high_energy_x else low_energy_text_y,
+                                            f'{vline1_x:.2f}',
+                                            ha='center', va='center',
+                                            color='grey', fontsize=10,
+                                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+
+            self.vline2_text = self.ax.text(vline2_x,
+                                            high_energy_text_y if vline2_x == high_energy_x else low_energy_text_y,
+                                            f'{vline2_x:.2f}',
+                                            ha='center', va='center',
+                                            color='grey', fontsize=10,
+                                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+
+    def update_vline_text_labels(self):
+        """Update the text labels when vlines are moved."""
+        if self.vline1 is not None and self.vline2 is not None and self.vline1_text is not None and self.vline2_text is not None:
+            # Get y-axis range for positioning
+            y_min, y_max = self.ax.get_ylim()
+            y_range = y_max - y_min
+
+            # Get current vline positions and round to 2 digits
+            vline1_x = round(self.vline1.get_xdata()[0], 2)
+            vline2_x = round(self.vline2.get_xdata()[0], 2)
+
+            # Determine which is high BE and which is low BE
+            if vline1_x > vline2_x:
+                high_be_text_y = y_min + 0.9 * y_range  # High BE at 90%
+                low_be_text_y = y_min + 0.8 * y_range  # Low BE at 80%
+
+                # vline1 is high BE, vline2 is low BE
+                self.vline1_text.set_position((vline1_x, high_be_text_y))
+                self.vline1_text.set_text(f'{vline1_x:.2f}')
+                self.vline2_text.set_position((vline2_x, low_be_text_y))
+                self.vline2_text.set_text(f'{vline2_x:.2f}')
+            else:
+                high_be_text_y = y_min + 0.9 * y_range  # High BE at 90%
+                low_be_text_y = y_min + 0.8 * y_range  # Low BE at 80%
+
+                # vline2 is high BE, vline1 is low BE
+                self.vline1_text.set_position((vline1_x, low_be_text_y))
+                self.vline1_text.set_text(f'{vline1_x:.2f}')
+                self.vline2_text.set_position((vline2_x, high_be_text_y))
+                self.vline2_text.set_text(f'{vline2_x:.2f}')
+
+    def remove_vline_text_labels(self):
+        """Remove vline text labels."""
+        if self.vline1_text is not None:
+            try:
+                self.vline1_text.remove()
+            except:
+                pass
+            self.vline1_text = None
+        if self.vline2_text is not None:
+            try:
+                self.vline2_text.remove()
+            except:
+                pass
+            self.vline2_text = None
+        # Remove existing center text if any
+        if hasattr(self, 'vline_center_text') and self.vline_center_text is not None:
+            try:
+                self.vline_center_text.remove()
+            except:
+                pass
+            self.vline_center_text = None
+
+    def refresh_vline_text_labels(self):
+        """Refresh vline text labels after zoom/plot operations."""
+        # Check if vlines exist and screens are active
+        if (self.vline1 is not None and self.vline2 is not None and
+                (self.background_tab_selected or
+                 (hasattr(self, 'area_tab_selected') and self.area_tab_selected))):
+
+            # Update main window vline text labels
+            if hasattr(self, 'update_vline_text_labels'):
+                self.update_vline_text_labels()
+
+            # Update area screen vline text labels if open
+            if (hasattr(self, 'background_window') and self.background_window is not None and
+                    hasattr(self.background_window, 'update_vline_text_labels')):
+                self.background_window.update_vline_text_labels()
+
+    def remove_background_vlines(self):
+        """Completely remove background vlines from the plot"""
+        if self.vline1 is not None:
+            try:
+                self.vline1.remove()
+            except:
+                pass
+            self.vline1 = None
+        if self.vline2 is not None:
+            try:
+                self.vline2.remove()
+            except:
+                pass
+            self.vline2 = None
+        # Add text removal
+        if hasattr(self, 'vline1_text') and self.vline1_text is not None:
+            try:
+                self.vline1_text.remove()
+            except:
+                pass
+            self.vline1_text = None
+        if hasattr(self, 'vline2_text') and self.vline2_text is not None:
+            try:
+                self.vline2_text.remove()
+            except:
+                pass
+            self.vline2_text = None
+        # Remove existing center text if any
+        if hasattr(self, 'vline_center_text') and self.vline_center_text is not None:
+            try:
+                self.vline_center_text.remove()
+            except:
+                pass
+            self.vline_center_text = None
+
+    def update_fitting_screen_range_controls(self):
+        """Update fitting screen range controls when vlines move"""
+        if (hasattr(self, 'fitting_window') and self.fitting_window is not None and
+                hasattr(self.fitting_window, 'update_range_controls_from_data')):
+            self.fitting_window.update_range_controls_from_data()
+
 
     def is_mouse_on_peak(self, event):
         if self.selected_peak_index is not None:
 
             return True
         return False
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1477,9 +2187,14 @@ class MyFrame(wx.Frame):
             if self.background_method == "Multi-Regions Smart":
                 self.plot_manager.plot_background(self)
 
-
     def on_zoom_in_tool(self, event):
         self.plot_config.on_zoom_in_tool(self)
+        # Refresh vline text labels after zoom
+        self.refresh_vline_text_labels()
+
+        # Update averaging indicator lines after zoom
+        if hasattr(self, 'add_averaging_indicator_lines'):
+            self.add_averaging_indicator_lines()
 
     def on_zoom_select(self, eclick, erelease):
         self.plot_config.on_zoom_select(self, eclick, erelease)
@@ -1491,8 +2206,18 @@ class MyFrame(wx.Frame):
                 self.rsd_text.remove()
                 self.rsd_text = None
 
+        # Update averaging indicator lines after zoom
+        if hasattr(self, 'add_averaging_indicator_lines'):
+            self.add_averaging_indicator_lines()
+
     def on_zoom_out(self, event):
         self.plot_config.on_zoom_out(self)
+        # Refresh vline text labels after zoom
+        self.refresh_vline_text_labels()
+
+        # Update averaging indicator lines after zoom
+        if hasattr(self, 'add_averaging_indicator_lines'):
+            self.add_averaging_indicator_lines()
 
     def on_drag_tool(self, event):
         self.plot_config.on_drag_tool(self)
@@ -2020,12 +2745,32 @@ class MyFrame(wx.Frame):
             return round(area, 2)
         elif model =="D-parameter":
             return
+        elif model =="Fermi":
+            return
         else:
             raise ValueError(f"Unknown fitting model: {model}")
         return round(area, 2)
 
+    def on_auto_id(self, event):
+        """Open Auto ID window for survey/wide scan identification"""
+        try:
+            sheet_name = self.sheet_combobox.GetValue()
 
+            # Check if this is a survey or wide scan
+            if not any(x in sheet_name.lower() for x in ['survey', 'wide']):
+                wx.MessageBox("Auto ID is only available for Survey or Wide scan sheets", "Info",
+                              wx.OK | wx.ICON_INFORMATION)
+                return
 
+            # Import and open AutoID window
+            from libraries.ToolsMenu.AutoID import AutoIDWindow
+            auto_id_window = AutoIDWindow(self)
+            auto_id_window.Show()
+
+        except ImportError:
+            wx.MessageBox("AutoID module not found", "Error", wx.OK | wx.ICON_ERROR)
+        except Exception as e:
+            wx.MessageBox(f"Auto ID failed: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 
 
     def update_ratios(self):
@@ -2182,8 +2927,64 @@ class MyFrame(wx.Frame):
                 selected_rows.append(row)
         return selected_rows
 
+    def refresh_area_screen(self):
+        """Refresh area screen when sheet changes - quick open/close effect"""
+        if not (hasattr(self, 'background_window') and self.background_window is not None):
+            return
 
+        try:
+            # Update area screen vlines for new sheet
+            if hasattr(self.background_window, 'initialize_or_restore_area_vlines'):
+                self.background_window.initialize_or_restore_area_vlines()
 
+            # Update range controls to reflect new sheet data
+            if hasattr(self.background_window, 'update_range_controls_from_data'):
+                self.background_window.update_range_controls_from_data()
+
+            # Update background method combobox if needed
+            if hasattr(self.background_window, 'method_combobox'):
+                current_method = getattr(self, 'background_method', 'Multi-Regions Smart')
+                self.background_window.method_combobox.SetValue(current_method)
+
+            # Ensure vlines are visible
+            self.ensure_area_vlines_visible()
+
+            # Force canvas refresh
+            self.canvas.draw_idle()
+
+        except (RuntimeError, AttributeError):
+            # Window might be closing, ignore errors
+            pass
+
+    def convert_energy_for_display(self, be_value):
+        """
+        Generalized function to convert BE to display energy based on current energy scale.
+
+        Args:
+            be_value: Binding Energy value
+
+        Returns:
+            Energy value in current display scale (BE or KE)
+        """
+        if self.energy_scale == 'KE':
+            return self.photons - be_value
+        else:
+            return be_value
+
+    def convert_energy_from_display(self, display_value):
+        """
+        Convert display energy back to BE for storage.
+
+        Args:
+            display_value: Energy value in current display scale
+
+        Returns:
+            Binding Energy value
+        """
+        if self.energy_scale == 'KE':
+            return self.photons - display_value
+        else:
+            return display_value
 
     def set_max_iterations(self, value):
         self.max_iterations = value
@@ -2249,7 +3050,7 @@ class MyFrame(wx.Frame):
         sheet_name = self.sheet_combobox.GetValue()
 
         # Skip fit_peaks for D-parameter model
-        if grid_fitting_method not in ["D-parameter", "Unfitted"]:
+        if grid_fitting_method not in ["D-parameter", "Unfitted", "Fermi"]:
             if hasattr(self, 'peak_params_grid') and self.peak_params_grid.GetNumberRows() > 0:
                 from Functions import fit_peaks
                 fit_result = fit_peaks(self, self.peak_params_grid, evaluate=True)
@@ -2266,6 +3067,15 @@ class MyFrame(wx.Frame):
                         for i in range(self.peak_params_grid.GetNumberRows() // 2):
                             peak_labels.append(self.peak_params_grid.GetCellValue(i * 2, 1))
 
+
+                        # Temporarily disable masking to get full-length data for Excel export
+                        original_get_bg_regions = self.plot_manager.get_background_regions
+                        self.plot_manager.get_background_regions = lambda window: None
+
+                        # Force a replot to get unmasked collections
+                        self.clear_and_replot()
+
+                        # Now extract the unmasked collection data
                         for collection in self.ax.collections:
                             # Check if the collection label matches any peak label
                             for peak_label in peak_labels:
@@ -2274,6 +3084,10 @@ class MyFrame(wx.Frame):
                                           f"max height: {max(collection.get_paths()[0].vertices[:, 1])}")
                                     data['individual_peak_fits'].append(collection.get_paths()[0].vertices[:, 1])
                                     break
+
+                        # Restore original masking function and replot with masking
+                        self.plot_manager.get_background_regions = original_get_bg_regions
+                        self.clear_and_replot()
 
         return data
 
@@ -2787,6 +3601,165 @@ class MyFrame(wx.Frame):
         kherve_frame = PeriodicTableXPS()
         kherve_frame.Show()
 
+    def on_results_grid_right_click(self, event):
+        """Handle right-click on results grid"""
+        row = event.GetRow()
+        col = event.GetCol()
+
+        menu = wx.Menu()
+
+        # Export Fitting Grid
+        export_item = menu.Append(wx.ID_ANY, "Export Fitting Grid")
+        from libraries.FileMenu.Export import export_results
+        self.Bind(wx.EVT_MENU, lambda evt: export_results(self), export_item)
+
+        menu.AppendSeparator()
+
+        # Remove All Lines
+        remove_all_item = menu.Append(wx.ID_ANY, "Remove All Lines")
+        from libraries.Widgets_Toolbars import on_delete_all
+        self.Bind(wx.EVT_MENU, lambda evt: on_delete_all(self, evt), remove_all_item)
+
+        # Remove First Line
+        remove_first_item = menu.Append(wx.ID_ANY, "Remove First Line")
+        from libraries.Widgets_Toolbars import on_delete_first
+        self.Bind(wx.EVT_MENU, lambda evt: on_delete_first(self, evt), remove_first_item)
+
+        # Remove Last Line
+        remove_last_item = menu.Append(wx.ID_ANY, "Remove Last Line")
+        from libraries.Widgets_Toolbars import on_delete_last
+        self.Bind(wx.EVT_MENU, lambda evt: on_delete_last(self, evt), remove_last_item)
+
+        self.results_grid.PopupMenu(menu)
+        menu.Destroy()
+
+    def update_results_grid_label(self):
+        """Update the Results grid label based on current row"""
+        if hasattr(self, 'results_frame_box'):
+            sheet_name = self.sheet_combobox.GetValue() if hasattr(self, 'sheet_combobox') else 'Sheet0'
+            row_number = 0
+            import re
+            match = re.search(r'(\d+)$', sheet_name)
+            if match:
+                row_number = int(match.group(1))
+
+            self.results_frame_box.SetLabel(f"Results [Row {row_number}]")
+            self.results_frame_box.GetParent().Layout()  # Refresh the layout
+
+    def add_averaging_indicator_lines(self):
+        """Add transparent lines showing the averaging points for the vlines."""
+        if self.vline1 is None or self.vline2 is None:
+            return
+
+        try:
+            # Remove any existing averaging indicator lines first
+            lines_to_remove = [line for line in self.ax.lines if hasattr(line, '_averaging_indicator')]
+            for line in lines_to_remove:
+                line.remove()
+
+            # Only show averaging indicator lines if fitting screen window is open with background tab selected
+            if not (hasattr(self, 'fitting_window') and
+                    self.fitting_window is not None and
+                    hasattr(self, 'background_tab_selected') and
+                    self.background_tab_selected):
+                return
+
+            # Get current sheet and data
+            sheet_name = self.sheet_combobox.GetValue()
+            if (sheet_name not in self.Data['Core levels'] or
+                    'B.E.' not in self.Data['Core levels'][sheet_name]):
+                return
+
+            # Get data arrays
+            x_values = np.array(self.Data['Core levels'][sheet_name]['B.E.'], dtype=float)
+            y_values = np.array(self.Data['Core levels'][sheet_name]['Raw Data'], dtype=float)
+
+            # Get background data - this is what the lines should follow
+            background_data = self.Data['Core levels'][sheet_name]['Background'].get('Bkg Y', y_values)
+            background_y = np.array(background_data, dtype=float)
+
+            # Get averaging points setting and ensure it's valid
+            averaging_points = getattr(self, 'averaging_points', 5)
+            if averaging_points <= 0:
+                averaging_points = 1
+                self.averaging_points = 1  # Update the stored value too
+
+            # Get Y axis range for line extent (1% of range)
+            y_min, y_max = self.ax.get_ylim()
+            y_range = y_max - y_min
+            line_extent = 0.1 * y_range  # ±1% of Y range
+
+            # Get vline display positions (rounded to 2 decimals)
+            vline1_x = round(self.vline1.get_xdata()[0], 2)
+            vline2_x = round(self.vline2.get_xdata()[0], 2)
+
+            # Determine which vline is at higher BE and which is at lower BE
+            vline1_be = self.convert_energy_from_display(vline1_x)
+            vline2_be = self.convert_energy_from_display(vline2_x)
+
+            # Process each vline
+            for vline_x in [vline1_x, vline2_x]:
+                # Convert display position back to BE coordinate
+                vline_be = self.convert_energy_from_display(vline_x)
+
+                # Find the closest data point to this vline position
+                idx = np.argmin(np.abs(x_values - vline_be))
+                vline_data_x = x_values[idx]
+                vline_data_y = background_y[idx]  # Use background Y value
+
+                # Determine if this is high BE or low BE
+                if vline_be > min(vline1_be, vline2_be) + (max(vline1_be, vline2_be) - min(vline1_be, vline2_be)) / 2:
+                    # This is the HIGH BE vLine
+                    # For high BE: vline position is one limit, subtract averaging_points to get other limit (towards lower BE)
+                    limit1_idx = idx  # vLine position is one limit
+                    limit2_idx = max(0, idx + averaging_points - 1)  # Go towards lower BE (subtract indices)
+                else:
+                    # This is the LOW BE vLine
+                    # For low BE: vline position is one limit, ADD averaging_points to get other limit (towards higher BE)
+                    limit1_idx = idx  # vLine position is one limit
+                    limit2_idx = min(len(x_values) - 1, idx - averaging_points + 1)  # Go towards higher BE (add indices)
+
+                # Get the actual limit positions from background data
+                limit1_x = x_values[limit1_idx]
+                limit1_y = background_y[limit1_idx]  # Use background Y value
+                limit2_x = x_values[limit2_idx]
+                limit2_y = background_y[limit2_idx]  # Use background Y value
+
+                # Calculate center position (middle of the two limits)
+                center_idx = (limit1_idx + limit2_idx) // 2
+                center_x = x_values[center_idx]
+                center_y = background_y[center_idx]  # Use background Y value
+
+                # Convert to display coordinates
+                limit1_display = self.convert_energy_for_display(limit1_x)
+                limit2_display = self.convert_energy_for_display(limit2_x)
+                center_display = self.convert_energy_for_display(center_x)
+
+                # Draw the lines
+                # Limit 1 (red) - this is the vLine position
+                limit1_line = self.ax.plot([limit1_display, limit1_display],
+                                           [limit1_y - line_extent, limit1_y + line_extent],
+                                           color='red', alpha=0.5, linewidth=0.5, linestyle='--')[0]
+                limit1_line._averaging_indicator = True
+
+                # Limit 2 (red) - this is the other end of the averaging range
+                limit2_line = self.ax.plot([limit2_display, limit2_display],
+                                           [limit2_y - line_extent, limit2_y + line_extent],
+                                           color='red', alpha=0.5, linewidth=0.5, linestyle='--')[0]
+                limit2_line._averaging_indicator = True
+
+                # Center (grey)
+                center_line = self.ax.plot([center_display, center_display],
+                                           [center_y - line_extent, center_y + line_extent],
+                                           color='grey', alpha=0.5, linewidth=0.5, linestyle='--')[0]
+                center_line._averaging_indicator = True
+
+            # Force canvas redraw
+            self.canvas.draw_idle()
+
+        except Exception as e:
+            print(f"Could not draw averaging indicator lines: {e}")
+
 
 
 def set_high_priority():
@@ -2814,11 +3787,11 @@ def main():
     os_name = platform.system()
 
     if os_name == "Darwin":  # Mac OS
-        frame = MyFrame(None, "KherveFitting-v1.545 25g07")
+        frame = MyFrame(None, "KherveFitting-v1.63_25h28")
     elif os_name == "Windows":
-        frame = MyFrame(None, "KherveFitting-v1.545 25g07")
+        frame = MyFrame(None, "KherveFitting-v1.63_25h28")
     else:
-        frame = MyFrame(None, "KherveFitting-v1.545 25g07")
+        frame = MyFrame(None, "KherveFitting-v1.63_25h28")
 
     # Apply preferences before showing the frame
     if hasattr(frame, 'times_opened') and frame.times_opened > 1:

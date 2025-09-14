@@ -12,7 +12,7 @@ import json
 # from KherveFitting import FIRST_TIME_USE
 
 
-def check_first_time_use(frame):
+def check_first_time_use_OLD(frame):
     config = frame.load_config()
     times_opened = config.get('times_opened', 0)
 
@@ -31,40 +31,58 @@ def check_first_time_use(frame):
                 # Make sure config is also updated
                 frame.save_config()
 
-    elif times_opened == 4:
-        # Show manual dialog on second run
-        dlg = wx.MessageDialog(frame,
-                              "Would you like to open the manual to the Getting Started section?",
-                              "Welcome to KherveFitting",
-                              wx.YES_NO | wx.ICON_QUESTION)
-
-        if dlg.ShowModal() == wx.ID_YES:
-            import os
-            import sys
-            import platform
-            import subprocess
-
-            if getattr(sys, 'frozen', False):
-                application_path = os.path.dirname(sys.executable)
-            else:
-                application_path = os.path.dirname(os.path.abspath(__file__))
-
-            manual_path = os.path.join(application_path, "Manual.pdf")
-
-            if platform.system() == 'Windows':
-                os.startfile(manual_path)
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.call(['open', manual_path])
-            else:  # Linux and other Unix-like systems
-                subprocess.call(['xdg-open', manual_path])
-
-        dlg.Destroy()
+    # elif times_opened == 4:
+    #     # Show manual dialog on second run
+    #     dlg = wx.MessageDialog(frame,
+    #                           "Would you like to open the manual to the Getting Started section?",
+    #                           "Welcome to KherveFitting",
+    #                           wx.YES_NO | wx.ICON_QUESTION)
+    #
+    #     if dlg.ShowModal() == wx.ID_YES:
+    #         import os
+    #         import sys
+    #         import platform
+    #         import subprocess
+    #
+    #         if getattr(sys, 'frozen', False):
+    #             application_path = os.path.dirname(sys.executable)
+    #         else:
+    #             application_path = os.path.dirname(os.path.abspath(__file__))
+    #
+    #         manual_path = os.path.join(application_path, "Manual.pdf")
+    #
+    #         if platform.system() == 'Windows':
+    #             os.startfile(manual_path)
+    #         elif platform.system() == 'Darwin':  # macOS
+    #             subprocess.call(['open', manual_path])
+    #         else:  # Linux and other Unix-like systems
+    #             subprocess.call(['xdg-open', manual_path])
+    #
+    #     dlg.Destroy()
 
     # Update times_opened in the frame's attribute
     frame.times_opened = times_opened + 1
 
     # Save config
     frame.save_config()
+
+
+def check_first_time_use(frame):
+    config = frame.load_config()
+    times_opened = config.get('times_opened', 5)
+
+    # Check if we need to track usage at milestone intervals
+    from libraries.MarketResearch import check_usage_tracking_needed, submit_usage_data, get_user_location
+    if check_usage_tracking_needed(times_opened):
+        # Get user location data
+        location_data = get_user_location()
+
+        # Submit usage tracking data to Google Excel
+        success = submit_usage_data(times_opened, location_data)
+        if success:
+            print(f"Usage milestone {times_opened:.2f} tracked successfully")
+        else:
+            print(f"Failed to track usage milestone {times_opened:.2f}")
 
 def _clear_peak_params_grid(window):
     num_rows = window.peak_params_grid.GetNumberRows()
@@ -325,6 +343,11 @@ def rename_sheet(window, new_sheet_name):
     if not new_sheet_name:
         return
 
+    # Check for single word validation
+    if len(new_sheet_name.split()) > 1:
+        window.show_popup_message2("Invalid Name", "Only one single word is allowed for core levels or sheet names.")
+        return
+
     # Create backup before renaming
     from libraries.Utilities import perform_auto_backup
     perform_auto_backup(window)
@@ -407,7 +430,8 @@ def copy_sheet(window):
     if sheet_name != '':
         # Extract the base name and numeric suffix with more detailed pattern
         import re
-        match = re.match(r'([A-Za-z]+\d+[spdfg]*)(\d*)$', sheet_name)
+        # match = re.match(r'([A-Za-z]+\d+[spdfg]*)(\d*)$', sheet_name)
+        match = re.match(r'([A-Za-z]+(?:\d+[spdfg]+)?)(\d*)$', sheet_name)
         if match:
             base_name = match.group(1)  # Ti2p
             number_suffix = match.group(2)  # 8 or "" if none
@@ -601,8 +625,12 @@ def propagate_constraint(window, row, col):
             # Calculate split (difference in position)
             target_pos = float(window.peak_params_grid.GetCellValue(data_row_i, col))
             split = target_pos - source_value
-            constraint_value = f"{peak_letter}+{split:.2f}#0.1"
-
+            print(f'split value: {split}')
+            # Fix the +- issue when split is negative
+            if split >= 0:
+                constraint_value = f"{peak_letter}+{split:.2f}#0.1"
+            else:
+                constraint_value = f"{peak_letter}{split:.2f}#0.1"  # split is already negative
         elif col == 6:  # Area
             # Calculate ratio
             target_area = float(window.peak_params_grid.GetCellValue(data_row_i, col))
@@ -831,6 +859,7 @@ class CropWindow(wx.Frame):
         # Extract base name and ensure we don't create a '0' suffix
         import re
         match = re.match(r'([A-Za-z]+\d*[spdfg]*)(\d*)$', suggested_name)
+        # match = re.match(r'([A-Za-z]+(?:\d+[spdfg]+)?)(\d*)$', suggested_name)
         if match:
             base_name = match.group(1)  # Base name like C1s
             number_suffix = match.group(2)  # Numeric suffix or empty

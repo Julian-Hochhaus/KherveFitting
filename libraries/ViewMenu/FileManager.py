@@ -12,11 +12,13 @@ from libraries.FileMenu.Save import save_state
 
 class FileManagerWindow(wx.Frame):
     def __init__(self, parent, *args, **kwargs):
+        self.parent = parent
+
         # Check for maximum row index before initializing the window
         if hasattr(parent, 'Data') and 'Core levels' in parent.Data:
             max_index = 0
             for sheet_name in parent.Data['Core levels'].keys():
-                match = re.match(r'[A-Za-z0-9]+?(\d*)$', sheet_name)
+                match = re.match(r'[A-Za-z0-9-]+?(\d*)$', sheet_name)
                 if match:
                     index_str = match.group(1)
                     index = int(index_str) if index_str else 0
@@ -37,7 +39,7 @@ class FileManagerWindow(wx.Frame):
                          style=wx.DEFAULT_FRAME_STYLE | wx.STAY_ON_TOP, *args, **kwargs)
 
         # Add this line to set a minimum window size
-        self.SetMinSize((630, 50))  # Ensure toolbar icons remain visible
+        self.SetMinSize((655, 50))  # Ensure toolbar icons remain visible
 
         self.offset_multiplier = 1
         self.last_offset_sheets = []
@@ -80,13 +82,6 @@ class FileManagerWindow(wx.Frame):
         # NOW load BE corrections after the grid is created
         self.load_be_corrections()
 
-        # # Position window relative to main window
-        # main_pos = parent.GetPosition()
-        # main_size = parent.GetSize()
-        # file_manager_size = self.GetSize()
-        # pos_x = main_pos.x + (main_size.width - file_manager_size.width) // 2
-        # pos_y = main_pos.y + (main_size.height - file_manager_size.height) // 2
-        # self.SetPosition((pos_x, pos_y))
 
         # Position window using saved position or relative to main window
         if hasattr(parent, 'file_manager_position') and parent.file_manager_position:
@@ -133,6 +128,10 @@ class FileManagerWindow(wx.Frame):
         current_sheet = self.parent.sheet_combobox.GetValue()
         if current_sheet:
             self.highlight_current_sheet(current_sheet)
+
+        # Set up drag and drop functionality AFTER everything is initialized
+        file_drop_target = FileManagerDropTarget(self)
+        self.SetDropTarget(file_drop_target)
 
     def on_cell_changed(self, event):
         """Handle completed cell edit event"""
@@ -213,6 +212,13 @@ class FileManagerWindow(wx.Frame):
                                              "Delete the last 2 rows from the grid")
         self.Bind(wx.EVT_TOOL, lambda evt: self.delete_single_row(), del_rows_tool)
 
+        # Add Files button (NEW)
+        add_files_tool = self.toolbar.AddTool(wx.ID_ANY, 'Add File(s)',
+                                              wx.Bitmap(os.path.join(icon_path, "Add-Files-3.png"),
+                                                        wx.BITMAP_TYPE_PNG),
+                                              shortHelp="Add KherveFitting file(s) to current file")
+        self.Bind(wx.EVT_TOOL, self.on_add_files, add_files_tool)
+
         # Copy button
         copy_icon = os.path.join(icon_path, "copy-3.png")
         if os.path.exists(copy_icon):
@@ -269,19 +275,21 @@ class FileManagerWindow(wx.Frame):
                                           "Multiply selected core level by 1000")
         self.Bind(wx.EVT_TOOL, self.on_multiply_1000, x1000_tool)
 
+        # Subtract button
+        subtract_icon = os.path.join(icon_path, "Sub-3.png")
+        if os.path.exists(subtract_icon):
+            subtract_bmp = wx.Bitmap(subtract_icon)
+        else:
+            subtract_bmp = wx.ArtProvider.GetBitmap(wx.ART_MINUS, wx.ART_TOOLBAR)
+        subtract_tool = self.toolbar.AddTool(wx.ID_ANY, "Subtract Selected", subtract_bmp, "Subtract selected core levels")
+        self.Bind(wx.EVT_TOOL, self.on_subtract_selected, subtract_tool)
+
         # Sum button
-        sum_icon = os.path.join(icon_path, "SUM-25.png")
+        sum_icon = os.path.join(icon_path, "SuM-3.png")
         sum_bmp = wx.Bitmap(sum_icon)
         sum_tool = self.toolbar.AddTool(wx.ID_ANY, "Sum Selected", sum_bmp, "Sum selected core levels")
         self.Bind(wx.EVT_TOOL, self.on_sum_selected, sum_tool)
-        #
-        # sort_icon = os.path.join(icon_path, "Sort-25.png")
-        # if os.path.exists(sort_icon):
-        #     sort_bmp = wx.Bitmap(sort_icon)
-        # else:
-        #     sort_bmp = wx.ArtProvider.GetBitmap(wx.ART_SORT_ASC, wx.ART_TOOLBAR)
-        # sort_tool = self.toolbar.AddTool(wx.ID_ANY, "Sort Sheets", sort_bmp, "Sort sheets by sample groups")
-        # self.Bind(wx.EVT_TOOL, self.sort_excel_sheets, sort_tool)
+
 
         # Plot button
         plot_icon = os.path.join(icon_path, "Plot2-25.png")
@@ -336,7 +344,7 @@ class FileManagerWindow(wx.Frame):
         self.toolbar.AddStretchableSpace()
 
         # Add experimental description info button
-        exp_info_icon = os.path.join(icon_path, "info-25.png")
+        exp_info_icon = os.path.join(icon_path, "Infos-3.png")
         if os.path.exists(exp_info_icon):
             exp_info_bmp = wx.Bitmap(exp_info_icon)
         else:
@@ -346,17 +354,9 @@ class FileManagerWindow(wx.Frame):
                                              "\nCurrently only upport .vms and .kal")
         self.Bind(wx.EVT_TOOL, self.on_view_exp_info, exp_info_tool)
 
-        # # Backup button
-        # backup_icon = os.path.join(icon_path, "backup-25.png")
-        # if os.path.exists(backup_icon):
-        #     backup_bmp = wx.Bitmap(backup_icon)
-        # else:
-        #     backup_bmp = wx.ArtProvider.GetBitmap(wx.ART_FILE_SAVE_AS, wx.ART_TOOLBAR)
-        # backup_tool = self.toolbar.AddTool(wx.ID_ANY, "Backup", backup_bmp, "Create a backup of current files")
-        # self.Bind(wx.EVT_TOOL, self.on_backup, backup_tool)
 
         # Add F2/Ctrl+2 info button
-        f2_icon = os.path.join(icon_path, "Find-25.png")  # Use existing plot icon or another appropriate one
+        f2_icon = os.path.join(icon_path, "Help-3.png")  # Use existing plot icon or another appropriate one
         if os.path.exists(f2_icon):
             f2_bmp = wx.Bitmap(f2_icon)
         else:
@@ -380,6 +380,52 @@ class FileManagerWindow(wx.Frame):
         self.is_collapsed = False
         self.expanded_height = 300  # Default expanded height
         self.collapsed_height = 70  # Collapsed height
+
+    def on_add_files(self, event):
+        """Handle Add Files button click"""
+        # Check if we have a current file open
+        if not hasattr(self.parent, 'Data') or not self.parent.Data.get('FilePath'):
+            wx.MessageBox("No file is currently open to add data to.", "Error", wx.OK | wx.ICON_ERROR)
+            return
+
+        # Show file dialog for selecting files
+        wildcard = "KherveFitting files (*.xlsx)|*.xlsx"
+
+        with wx.FileDialog(self, "Select KherveFitting file(s) to add",
+                           wildcard=wildcard,
+                           style=wx.FD_OPEN | wx.FD_MULTIPLE | wx.FD_FILE_MUST_EXIST) as fileDialog:
+
+            if fileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+
+            file_paths = fileDialog.GetPaths()
+
+            # Process each selected file
+            for file_path in file_paths:
+                # Check if it's a KherveFitting file
+                if self._is_khervefitting_file(file_path):
+                    # Add the file using our existing logic
+                    wx.CallAfter(self._add_file_to_current, file_path)
+                else:
+                    wx.MessageBox(f"File {os.path.basename(file_path)} is not a KherveFitting file.",
+                                  "Invalid File", wx.OK | wx.ICON_WARNING)
+
+    def _is_khervefitting_file(self, file_path):
+        """Check if the Excel file is a KherveFitting file (not Avantage)"""
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path)
+            is_khervefitting = "Titles" not in wb.sheetnames
+            wb.close()
+            return is_khervefitting
+        except Exception:
+            return False
+
+    def _add_file_to_current(self, file_path):
+        """Add the selected file's data to the current file"""
+        # Use the existing FileManagerDropTarget logic
+        drop_target = FileManagerDropTarget(self)
+        drop_target._add_file_to_current(file_path)
 
     def on_stacked_plot_right_click(self, event):
         """Handle right-click on stacked plot tool to decrease spacing"""
@@ -539,9 +585,25 @@ class FileManagerWindow(wx.Frame):
             # For editable columns, let the default double-click behavior work
             event.Skip()
         else:
+            # Check if it's a core level column (contains a sheet name)
+            cell_value = self.grid.GetCellValue(row, col)
+            if col > 0 and col <= len(self.core_levels) and cell_value and cell_value in self.parent.Data['Core levels']:
+                # Update label manager if it's open
+                self.update_label_manager_if_open(cell_value)
+
             # Call the plot function directly
             self.on_plot_selected(None)
             return  # Don't skip the event
+
+    def update_label_manager_if_open(self, sheet_name):
+        """Update label manager if it's currently open"""
+        if hasattr(self.parent, 'labels_window') and self.parent.labels_window and self.parent.labels_window.IsShown():
+            # Set the sheet in parent first
+            self.parent.sheet_combobox.SetValue(sheet_name)
+            from libraries.Sheet_Operations import on_sheet_selected
+            on_sheet_selected(self.parent, sheet_name)
+            # Update the label manager grid
+            self.parent.labels_window.update_list()
 
     def get_unique_core_levels(self):
         """Get list of unique core level names from parent data"""
@@ -555,7 +617,7 @@ class FileManagerWindow(wx.Frame):
 
         return sorted(list(unique_levels))
 
-    def extract_base_name(self, sheet_name):
+    def extract_base_name_OLD(self, sheet_name):
         """Extract base core level name without any trailing numbers"""
         # Add support for Raman files with underscores
         if "Raman_" in sheet_name or "Ra_" in sheet_name:
@@ -570,13 +632,42 @@ class FileManagerWindow(wx.Frame):
             return match.group(1)
         return sheet_name
 
+    def extract_base_name(self, sheet_name):
+        """Extract base core level name without any trailing numbers"""
+        # Add support for Raman files with underscores
+        if "Raman_" in sheet_name or "Ra_" in sheet_name:
+            # Special handling for Raman files with underscores
+            base_parts = sheet_name.split('_')
+            if len(base_parts) > 1:
+                return '_'.join(base_parts[:-1]) if base_parts[-1].isdigit() else sheet_name
+
+        # Updated pattern to handle hyphens in core level names like "Cut-Off"
+        match = re.match(r'([A-Za-z0-9-]+?)(\d*)$', sheet_name)
+        if match:
+            return match.group(1)
+        return sheet_name
+
+    def get_max_core_level_row_index_OLD(self):
+        """Get the maximum row index based on core level naming"""
+        max_index = 0
+
+        if hasattr(self.parent, 'Data') and 'Core levels' in self.parent.Data:
+            for sheet_name in self.parent.Data['Core levels'].keys():
+                match = re.match(r'[A-Za-z0-9-]+?(\d*)$', sheet_name)
+                if match:
+                    index_str = match.group(1)
+                    index = int(index_str) if index_str else 0
+                    max_index = max(max_index, index)
+
+        return max_index
+
     def get_max_core_level_row_index(self):
         """Get the maximum row index based on core level naming"""
         max_index = 0
 
         if hasattr(self.parent, 'Data') and 'Core levels' in self.parent.Data:
             for sheet_name in self.parent.Data['Core levels'].keys():
-                match = re.match(r'[A-Za-z0-9]+?(\d*)$', sheet_name)
+                match = re.match(r'[A-Za-z0-9-]+?(\d*)$', sheet_name)
                 if match:
                     index_str = match.group(1)
                     index = int(index_str) if index_str else 0
@@ -592,7 +683,8 @@ class FileManagerWindow(wx.Frame):
         # Find maximum index across all sheets
         max_index = 0
         for sheet_name in self.parent.Data['Core levels'].keys():
-            match = re.match(r'[A-Za-z0-9]+?(\d*)$', sheet_name)
+            # match = re.match(r'[A-Za-z0-9]+?(\d*)$', sheet_name)
+            match = re.match(r'[A-Za-z0-9-]+?(\d*)$', sheet_name)  # Updated pattern
             if match:
                 index_str = match.group(1)
                 index = int(index_str) if index_str else 0
@@ -636,7 +728,7 @@ class FileManagerWindow(wx.Frame):
                 index = int(index_str) if index_str else 0
             else:
                 # Original pattern for typical core levels
-                match = re.match(r'([A-Za-z0-9]+?)(\d*)$', sheet_name)
+                match = re.match(r'([A-Za-z0-9-]+?)(\d*)$', sheet_name)
                 if match:
                     base_name = match.group(1)
                     index_str = match.group(2)
@@ -932,6 +1024,12 @@ class FileManagerWindow(wx.Frame):
         if key_code == wx.WXK_F2:
             # Call the plot function directly
             self.on_plot_selected(None)
+
+            # Update label manager if it's open
+            sheet_names = self.get_selected_sheet_names()
+            if sheet_names:
+                self.update_label_manager_if_open(sheet_names[0])
+
             return  # Don't skip the event
         elif key_code == wx.WXK_F3:
             # Call the offset plot function
@@ -1041,7 +1139,7 @@ class FileManagerWindow(wx.Frame):
         # Find the earliest available row
         used_rows = []
         for sheet in self.parent.Data['Core levels'].keys():
-            match = re.match(r'([A-Za-z0-9]+?)(\d*)$', sheet)
+            match = re.match(r'([A-Za-z0-9-]+?)(\d*)$', sheet)
             if match:
                 sheet_base = match.group(1)
                 row_str = match.group(2)
@@ -1118,6 +1216,319 @@ class FileManagerWindow(wx.Frame):
         # Notify the user
         # wx.MessageBox(f"Created summed spectrum: {new_sheet_name}", "Sum Complete", wx.OK | wx.ICON_INFORMATION)
         self.parent.show_popup_message2("Sum Complete", f"Created summed spectrum: {new_sheet_name}")
+
+    def on_subtract_selected(self, event):
+        """Subtract the Y values of selected cells in the same column (only works with 2 selections)"""
+        save_state(self.parent)
+        # Get selected cells grouped by column
+        selected_by_column = {}
+
+        # Check for selected blocks first
+        blocks = self.grid.GetSelectedBlocks()
+        for block in blocks:  # Directly iterate over blocks instead of using GetCount()
+            top = block.GetTopRow()
+            bottom = block.GetBottomRow()
+            left = block.GetLeftCol()
+            right = block.GetRightCol()
+
+            for col in range(left, right + 1):
+                if col not in selected_by_column:
+                    selected_by_column[col] = []
+
+                for row in range(top, bottom + 1):
+                    cell_value = self.grid.GetCellValue(row, col)
+                    if cell_value and cell_value in self.parent.Data['Core levels']:
+                        selected_by_column[col].append(cell_value)
+
+        # Add individually selected cells
+        selected_cells = self.grid.GetSelectedCells()
+        for cell in selected_cells:
+            row, col = cell.GetRow(), cell.GetCol()
+
+            if col not in selected_by_column:
+                selected_by_column[col] = []
+
+            cell_value = self.grid.GetCellValue(row, col)
+            if cell_value and cell_value in self.parent.Data['Core levels']:
+                selected_by_column[col].append(cell_value)
+
+        # Process each column separately
+        for col, sheet_names in selected_by_column.items():
+            # Remove duplicates while preserving order
+            sheet_names = list(dict.fromkeys(sheet_names))
+
+            if len(sheet_names) < 2:
+                wx.MessageBox("Please select at least 2 core levels to subtract.", "Insufficient Selection", wx.OK | wx.ICON_WARNING)
+                continue
+            elif len(sheet_names) > 2:
+                # Take only the last 2 selected
+                sheet_names = sheet_names[-2:]
+
+            # Show confirmation dialog with choice of order
+            result = self.show_subtract_choice_dialog(sheet_names)
+            if result:
+                self.create_subtracted_spectrum(result, self.grid.GetColLabelValue(col))
+
+    def show_subtract_choice_dialog(self, sheet_names):
+        """Show dialog to choose which order to subtract the 2 core levels"""
+        # Check if both spectra have the same data length
+        first_length = len(self.parent.Data['Core levels'][sheet_names[0]]['Raw Data'])
+        second_length = len(self.parent.Data['Core levels'][sheet_names[1]]['Raw Data'])
+
+        if first_length != second_length:
+            wx.MessageBox(f"Cannot subtract: Data lengths do not match!\n{sheet_names[0]}: {first_length} points\n{sheet_names[1]}: {second_length} points",
+                          "Data Length Mismatch", wx.OK | wx.ICON_ERROR)
+            return None
+
+        # Create the dialog
+        dialog = wx.Dialog(self, wx.ID_ANY, "Choose Subtract Order", size=(450, 250))
+        dialog.SetWindowStyle(dialog.GetWindowStyle() | wx.STAY_ON_TOP)
+
+        # Position dialog relative to file manager window
+        fm_pos = self.GetPosition()
+        fm_size = self.GetSize()
+        dialog_size = dialog.GetSize()
+        x = fm_pos.x + (fm_size.width - dialog_size.width) // 2
+        y = fm_pos.y + (fm_size.height - dialog_size.height) // 2
+        dialog.SetPosition((x, y))
+
+        # Create sizer
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Title
+        title_text = wx.StaticText(dialog, wx.ID_ANY, "Select which subtraction to perform:")
+        title_font = title_text.GetFont()
+        title_font.SetWeight(wx.FONTWEIGHT_BOLD)
+        title_text.SetFont(title_font)
+        sizer.Add(title_text, 0, wx.ALL | wx.CENTER, 10)
+
+        # Data length information
+        length_text = wx.StaticText(dialog, wx.ID_ANY, f"Both spectra have {first_length} data points")
+        length_text.SetForegroundColour(wx.Colour(0, 128, 0))  # Green color
+        sizer.Add(length_text, 0, wx.ALL | wx.CENTER, 5)
+
+        # Radio buttons for choice
+        radio_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        option1 = wx.RadioButton(dialog, wx.ID_ANY, f"{sheet_names[0]} - {sheet_names[1]}", style=wx.RB_GROUP)
+        option2 = wx.RadioButton(dialog, wx.ID_ANY, f"{sheet_names[1]} - {sheet_names[0]}")
+
+        option1.SetValue(True)  # Default selection
+
+        radio_sizer.Add(option1, 0, wx.ALL | wx.LEFT, 10)
+        radio_sizer.Add(option2, 0, wx.ALL | wx.LEFT, 10)
+
+        sizer.Add(radio_sizer, 0, wx.ALL | wx.CENTER, 10)
+
+        # Buttons
+        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        ok_btn = wx.Button(dialog, wx.ID_OK, "Subtract")
+        cancel_btn = wx.Button(dialog, wx.ID_CANCEL, "Cancel")
+
+        button_sizer.Add(ok_btn, 0, wx.ALL, 5)
+        button_sizer.Add(cancel_btn, 0, wx.ALL, 5)
+
+        sizer.Add(button_sizer, 0, wx.ALL | wx.CENTER, 10)
+
+        dialog.SetSizer(sizer)
+        dialog.Fit()
+
+        # Show dialog and return result
+        result = dialog.ShowModal()
+
+        if result == wx.ID_OK:
+            if option1.GetValue():
+                chosen_order = [sheet_names[0], sheet_names[1]]
+            else:
+                chosen_order = [sheet_names[1], sheet_names[0]]
+
+            dialog.Destroy()
+            return chosen_order
+        else:
+            dialog.Destroy()
+            return None
+
+    def show_subtract_confirmation(self, sheet_names):
+        """Show a confirmation dialog for subtract operation with data length validation"""
+        # Check if all selected spectra have the same data length
+        first_sheet = sheet_names[0]
+        first_length = len(self.parent.Data['Core levels'][first_sheet]['Raw Data'])
+
+        length_mismatch = False
+        for sheet_name in sheet_names[1:]:
+            if len(self.parent.Data['Core levels'][sheet_name]['Raw Data']) != first_length:
+                length_mismatch = True
+                break
+
+        # Create the dialog
+        dialog = wx.Dialog(self, wx.ID_ANY, "Subtract Confirmation", size=(400, 300))
+        dialog.SetWindowStyle(dialog.GetWindowStyle() | wx.STAY_ON_TOP)
+
+        # Position dialog relative to file manager window
+        fm_pos = self.GetPosition()
+        fm_size = self.GetSize()
+        dialog_size = dialog.GetSize()
+        x = fm_pos.x + (fm_size.width - dialog_size.width) // 2
+        y = fm_pos.y + (fm_size.height - dialog_size.height) // 2
+        dialog.SetPosition((x, y))
+
+        # Create sizer
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Title
+        title_text = wx.StaticText(dialog, wx.ID_ANY, "Subtract Operation Order:")
+        title_font = title_text.GetFont()
+        title_font.SetWeight(wx.FONTWEIGHT_BOLD)
+        title_text.SetFont(title_font)
+        sizer.Add(title_text, 0, wx.ALL | wx.CENTER, 10)
+
+        # Show the operation order
+        operation_text = sheet_names[0]
+        for i, sheet_name in enumerate(sheet_names[1:], 1):
+            operation_text += f" - {sheet_name}"
+
+        operation_label = wx.StaticText(dialog, wx.ID_ANY, operation_text)
+        sizer.Add(operation_label, 0, wx.ALL | wx.CENTER, 10)
+
+        # Data length information
+        length_text = f"Data points: {first_length}"
+        length_label = wx.StaticText(dialog, wx.ID_ANY, length_text)
+        sizer.Add(length_label, 0, wx.ALL | wx.CENTER, 5)
+
+        # Warning if length mismatch
+        if length_mismatch:
+            warning_text = wx.StaticText(dialog, wx.ID_ANY, "WARNING: Selected spectra have different data lengths!")
+            warning_text.SetForegroundColour(wx.Colour(255, 0, 0))  # Red color
+            warning_font = warning_text.GetFont()
+            warning_font.SetWeight(wx.FONTWEIGHT_BOLD)
+            warning_text.SetFont(warning_font)
+            sizer.Add(warning_text, 0, wx.ALL | wx.CENTER, 10)
+
+            # Show individual lengths
+            for sheet_name in sheet_names:
+                sheet_length = len(self.parent.Data['Core levels'][sheet_name]['Raw Data'])
+                length_info = wx.StaticText(dialog, wx.ID_ANY, f"{sheet_name}: {sheet_length} points")
+                sizer.Add(length_info, 0, wx.ALL | wx.LEFT, 5)
+
+        # Buttons
+        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        if length_mismatch:
+            # Only show Cancel if there's a length mismatch
+            cancel_btn = wx.Button(dialog, wx.ID_CANCEL, "Cancel")
+            button_sizer.Add(cancel_btn, 0, wx.ALL, 5)
+        else:
+            # Show both OK and Cancel if lengths match
+            ok_btn = wx.Button(dialog, wx.ID_OK, "Proceed")
+            cancel_btn = wx.Button(dialog, wx.ID_CANCEL, "Cancel")
+            button_sizer.Add(ok_btn, 0, wx.ALL, 5)
+            button_sizer.Add(cancel_btn, 0, wx.ALL, 5)
+
+        sizer.Add(button_sizer, 0, wx.ALL | wx.CENTER, 10)
+
+        dialog.SetSizer(sizer)
+        dialog.Fit()
+
+        # Show dialog and return result
+        if length_mismatch:
+            dialog.ShowModal()
+            dialog.Destroy()
+            return False  # Don't proceed if lengths don't match
+        else:
+            result = dialog.ShowModal()
+            dialog.Destroy()
+            return result == wx.ID_OK
+
+    def create_subtracted_spectrum(self, sheet_names, base_name):
+        """Create a new spectrum that is the subtraction of exactly 2 spectra (first - second)"""
+        if len(sheet_names) != 2:
+            return
+
+        first_sheet, second_sheet = sheet_names[0], sheet_names[1]
+
+        # Double-check data lengths before proceeding
+        first_length = len(self.parent.Data['Core levels'][first_sheet]['Raw Data'])
+        second_length = len(self.parent.Data['Core levels'][second_sheet]['Raw Data'])
+
+        if first_length != second_length:
+            wx.MessageBox(f"Cannot subtract: Data lengths do not match!\n{first_sheet}: {first_length} points\n{second_sheet}: {second_length} points",
+                          "Error", wx.OK | wx.ICON_ERROR)
+            return
+
+        # Find the earliest available row
+        used_rows = []
+        for sheet in self.parent.Data['Core levels'].keys():
+            match = re.match(r'([A-Za-z0-9-]+?)(\d*)$', sheet)
+            if match:
+                sheet_base = match.group(1)
+                row_str = match.group(2)
+                if sheet_base == base_name:
+                    row_num = int(row_str) if row_str else 0
+                    used_rows.append(row_num)
+
+        # Find the first unused row number
+        row_num = 0
+        while row_num in used_rows:
+            row_num += 1
+
+        # Create the new sheet name with the available row
+        new_sheet_name = f"{base_name}{row_num}" if row_num > 0 else base_name
+
+        # Get X values from the first sheet
+        x_values = self.parent.Data['Core levels'][first_sheet]['B.E.']
+
+        # Subtract: first - second
+        first_y = np.array(self.parent.Data['Core levels'][first_sheet]['Raw Data'], dtype=float)
+        second_y = np.array(self.parent.Data['Core levels'][second_sheet]['Raw Data'], dtype=float)
+        subtracted_y = first_y - second_y
+
+        # Create a new entry in the parent data
+        if 'Core levels' not in self.parent.Data:
+            self.parent.Data['Core levels'] = {}
+            self.parent.Data['Number of Core levels'] = 0
+
+        self.parent.Data['Core levels'][new_sheet_name] = {
+            'Name': new_sheet_name,
+            'B.E.': x_values,
+            'Raw Data': [float(f"{val:.2f}") for val in subtracted_y.tolist()],
+            'Background': {
+                'Bkg Type': 'Linear',
+                'Bkg Low': min(x_values),
+                'Bkg High': max(x_values),
+                'Bkg Offset Low': 0,
+                'Bkg Offset High': 0,
+                'Bkg Y': [float(f"{val:.2f}") for val in subtracted_y.tolist()]  # Initially use raw data as background
+            }
+        }
+        self.parent.Data['Number of Core levels'] += 1
+
+        # Update the Excel file
+        import pandas as pd
+        df = pd.DataFrame({
+            'BE': x_values,
+            'Raw Data': [float(f"{val:.2f}") for val in subtracted_y.tolist()],
+            'Background': [float(f"{val:.2f}") for val in subtracted_y.tolist()],
+            'Transmission': [1.0] * len(x_values)
+        })
+
+        with pd.ExcelWriter(self.parent.Data['FilePath'], engine='openpyxl', mode='a',
+                            if_sheet_exists='replace') as writer:
+            df.to_excel(writer, sheet_name=new_sheet_name, index=False)
+
+        # Update combobox in parent
+        self.parent.sheet_combobox.Append(new_sheet_name)
+
+        # Plot the new sheet
+        self.parent.sheet_combobox.SetValue(new_sheet_name)
+        from libraries.Sheet_Operations import on_sheet_selected
+        on_sheet_selected(self.parent, new_sheet_name)
+
+        # Update the grid
+        self.populate_grid()
+
+        # Notify the user
+        operation_text = f"{first_sheet} - {second_sheet}"
+        self.parent.show_popup_message2("Subtract Complete", f"Created subtracted spectrum: {new_sheet_name}\nOperation: {operation_text}")
 
     def get_selected_sheet_names(self):
         """Get names of all currently selected sheets in the grid"""
@@ -1548,6 +1959,7 @@ class FileManagerWindow(wx.Frame):
         col = event.GetCol()  # Use event column instead of cursor position
         cell_value = self.grid.GetCellValue(row, col)
         if cell_value and cell_value in self.parent.Data['Core levels']:
+            # self.update_label_manager_if_open(cell_value)
             wx.CallAfter(self.quick_plot_sheet, cell_value)
 
 
@@ -1567,56 +1979,6 @@ class FileManagerWindow(wx.Frame):
                 except ValueError:
                     pass  # Ignore invalid correction values
 
-    def on_copy_OLD(self, event):
-        """Copy the selected core levels with columns C and D preserved exactly"""
-        import os
-        import json
-        import tempfile
-        from copy import deepcopy
-
-        sheet_names = self.get_selected_sheet_names()
-        if not sheet_names:
-            return
-
-        clipboard_data = {}
-
-        for sheet_name in sheet_names:
-            if sheet_name in self.parent.Data['Core levels']:
-                clipboard_data[sheet_name] = deepcopy(self.parent.Data['Core levels'][sheet_name])
-
-                file_path = self.parent.Data.get('FilePath', '')
-                if file_path and os.path.exists(file_path):
-                    try:
-                        # Read all data including columns C and D
-                        import pandas as pd
-                        df = pd.read_excel(file_path, sheet_name=sheet_name)
-
-                        # Store column names
-                        column_names = df.columns.tolist()
-                        clipboard_data[sheet_name]['column_names'] = column_names
-
-                        # Store exact data from columns C and D (indices 2 and 3)
-                        if df.shape[1] > 3:
-                            clipboard_data[sheet_name]['column_C_data'] = df.iloc[:, 2].tolist()
-                            clipboard_data[sheet_name]['column_D_data'] = df.iloc[:, 3].tolist()
-
-                    except Exception as e:
-                        print(f"Error reading Excel data for {sheet_name}: {e}")
-
-        # Show preview dialog
-        preview_dialog = CoreLevelPreviewDialog(self, "Copy Core Levels", clipboard_data, "copy")
-        if preview_dialog.ShowModal() != wx.ID_OK:
-            preview_dialog.Destroy()
-            return
-        preview_dialog.Destroy()
-
-        # Save to clipboard file
-        clipboard_file = os.path.join(tempfile.gettempdir(), 'khervefitting_corelevels_clipboard.json')
-        with open(clipboard_file, 'w') as f:
-            json.dump(clipboard_data, f)
-
-        # self.parent.show_popup_message2("Copy Successful",
-        #                                 f"{len(clipboard_data)} core level(s) copied with exact C and D columns")
 
     def on_copy(self, event):
         """Copy the selected core levels with original uncorrected BE values"""
@@ -1850,7 +2212,8 @@ class FileManagerWindow(wx.Frame):
         core_level_groups = {}
         for sheet_name in clipboard_data.keys():
             # Extract the true base name (e.g., "C1s" from "C1s2")
-            match = re.match(r'([A-Za-z]+\d*[spdfg]*)', sheet_name)
+            # match = re.match(r'([A-Za-z]+\d*[spdfg]*)', sheet_name)
+            match = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)', sheet_name)
             if match:
                 base_name = match.group(1)
                 if base_name not in core_level_groups:
@@ -1886,7 +2249,8 @@ class FileManagerWindow(wx.Frame):
             be_adjustment = source_correction - target_correction
 
             # Extract base name and determine which group it belongs to
-            match_base = re.match(r'([A-Za-z]+\d*[spdfg]*)', sheet_name)
+            # match_base = re.match(r'([A-Za-z]+\d*[spdfg]*)', sheet_name)
+            match_base = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)', sheet_name)
             if match_base:
                 base_name = match_base.group(1)
 
@@ -2005,7 +2369,7 @@ class FileManagerWindow(wx.Frame):
                     # Use original column names for Raman, standardized names for others
                     if is_raman:
                         column_names = core_level_data.get('column_names',
-                                                           ['BE', 'Raw Data', 'Background', 'Transmission'])
+                                                           ['BE','Corrected Data', 'Raw Data', 'Transmission'])
                     else:
                         # Force standard column names for all XPS core levels and surveys
                         column_names = ['Binding Energy (eV)', 'Corrected Data', 'Raw Data', 'Transmission']
@@ -2208,107 +2572,22 @@ class FileManagerWindow(wx.Frame):
             from libraries.Sheet_Operations import on_sheet_selected
             on_sheet_selected(self.parent, sheet_name)
 
-            dlg = wx.TextEntryDialog(self, f"Enter new name for {sheet_name}:", "Rename Core Level", sheet_name)
+            dlg = wx.TextEntryDialog(self, f"Enter new name for {sheet_name} (single word only):", "Rename Core Level",
+                                     sheet_name)
             if dlg.ShowModal() == wx.ID_OK:
                 new_name = dlg.GetValue()
                 if new_name and new_name != sheet_name:
-                    from libraries.Utilities import rename_sheet
-                    rename_sheet(self.parent, new_name)
-
-                    # Reload the grid after renaming
-                    self.populate_grid()
+                    # Check for single word validation
+                    if len(new_name.split()) > 1:
+                        self.parent.show_popup_message2("Invalid Name",
+                                                        "Only single words are allowed for sheet names.")
+                    else:
+                        from libraries.Utilities import rename_sheet
+                        rename_sheet(self.parent, new_name)
+                        # Reload the grid after renaming
+                        self.populate_grid()
             dlg.Destroy()
 
-    def on_delete_OLD(self, event):
-        """Delete selected core level(s)."""
-        # Gather all sheet names to delete
-        sheet_names = []
-
-        # Check if cells are selected
-        selected_cells = []
-        for row in range(self.grid.GetNumberRows()):
-            for col in range(1, len(self.core_levels) + 1):  # Skip sample name column
-                if self.grid.IsInSelection(row, col):
-                    cell_value = self.grid.GetCellValue(row, col)
-                    if cell_value and cell_value in self.parent.Data['Core levels']:
-                        sheet_names.append(cell_value)
-
-        # If no cells selected, try current cursor position
-        if not sheet_names:
-            row = self.grid.GetGridCursorRow()
-            col = self.grid.GetGridCursorCol()
-
-            if col > 0 and col <= len(self.core_levels):
-                cell_value = self.grid.GetCellValue(row, col)
-                if cell_value and cell_value in self.parent.Data['Core levels']:
-                    sheet_names.append(cell_value)
-
-        # Remove duplicates
-        sheet_names = list(set(sheet_names))
-
-        if not sheet_names:
-            self.parent.show_popup_message2("Information", "No core levels selected.")
-            return
-
-        # Confirm deletion
-        if wx.MessageBox(f"Are you sure you want to delete {len(sheet_names)} core level(s)?",
-                         "Confirm Delete", wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
-            return
-
-        # Backup before deletion
-        from libraries.Utilities import perform_auto_backup
-        perform_auto_backup(self.parent)
-
-        # Delete the sheets
-        for sheet_name in sheet_names:
-            # Delete the sheet from parent Data
-            if sheet_name in self.parent.Data['Core levels']:
-                del self.parent.Data['Core levels'][sheet_name]
-                self.parent.Data['Number of Core levels'] -= 1
-
-                # Also remove from Excel file if possible
-                try:
-                    import pandas as pd
-                    from openpyxl import load_workbook
-
-                    excel_path = self.parent.Data.get('FilePath', '')
-                    if excel_path and os.path.exists(excel_path):
-                        book = load_workbook(excel_path)
-                        if sheet_name in book.sheetnames:
-                            del book[sheet_name]
-                            book.save(excel_path)
-                except Exception as e:
-                    print(f"Error removing sheet from Excel: {e}")
-
-        # Save JSON file
-        json_file_path = os.path.splitext(self.parent.Data['FilePath'])[0] + '.json'
-        from libraries.FileMenu.Save import convert_to_serializable_and_round
-        json_data = convert_to_serializable_and_round(self.parent.Data)
-        with open(json_file_path, 'w') as json_file:
-            json.dump(json_data, json_file, indent=2)
-
-        # Update the parent's combobox
-        if hasattr(self.parent, 'sheet_combobox'):
-            current_sheet = self.parent.sheet_combobox.GetValue()
-            self.parent.sheet_combobox.Clear()
-            for sheet in self.parent.Data['Core levels'].keys():
-                self.parent.sheet_combobox.Append(sheet)
-
-            # Select an available sheet
-            if current_sheet in self.parent.Data['Core levels']:
-                self.parent.sheet_combobox.SetValue(current_sheet)
-            elif self.parent.sheet_combobox.GetCount() > 0:
-                self.parent.sheet_combobox.SetSelection(0)
-                new_sheet = self.parent.sheet_combobox.GetValue()
-                from libraries.Sheet_Operations import on_sheet_selected
-                on_sheet_selected(self.parent, new_sheet)
-
-        # Close and reopen the file manager to refresh all columns
-        self.parent.file_manager = None  # Clear the reference
-        self.Destroy()  # Close current file manager
-        wx.CallAfter(self.parent.on_open_file_manager, None)  # Reopen file manager
-
-        self.parent.show_popup_message2("Success", f"Deleted {len(sheet_names)} core level(s).")
 
     def on_delete(self, event):
         """Delete selected core level(s)."""
@@ -2647,7 +2926,8 @@ class FileManagerWindow(wx.Frame):
                     sample_num = ""
             else:
                 # Regular core level
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)(\d*)$', sheet_name)
+                # match = re.match(r'([A-Za-z]+\d*[spdfg]*)(\d*)$', sheet_name)
+                match = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)(\d*)$', sheet_name)
                 if match:
                     base_name, sample_num = match.groups()
                 else:
@@ -3979,7 +4259,7 @@ class FileManagerWindow(wx.Frame):
                             # Fallback to basic calculation
                             continue
 
-                    elif fitting_model in ["D-parameter", "SurveyID"]:
+                    elif fitting_model in ["D-parameter", "SurveyID", "VBM", "Fermi"]:
                         # Skip these models in overall fit calculation
                         continue
 
@@ -4030,18 +4310,15 @@ class FileManagerWindow(wx.Frame):
         exp_window = ExperimentalDescriptionWindow(self, sheet_name)
         exp_window.Show()
 
+
     def on_insert_row(self, target_row):
         """Insert a new row above the target row, incrementing all higher row numbers"""
-        if wx.MessageBox(f"Insert new row above row {target_row}?\nThis will increment all higher row numbers.",
-                         "Confirm Insert Row", wx.YES_NO | wx.ICON_QUESTION) != wx.YES:
-            return
 
         # Backup before operation
         from libraries.Utilities import perform_auto_backup
         perform_auto_backup(self.parent)
 
         # Get all core levels and group by row number
-        core_levels_by_row = {}
         sheets_to_rename = []
 
         for sheet_name in list(self.parent.Data['Core levels'].keys()):
@@ -4055,7 +4332,7 @@ class FileManagerWindow(wx.Frame):
                     row_num = 0
             else:
                 # Regular core level parsing
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)(\d*)$', sheet_name)
+                match = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)(\d*)$', sheet_name)
                 if match:
                     base_name = match.group(1)
                     row_str = match.group(2)
@@ -4066,28 +4343,16 @@ class FileManagerWindow(wx.Frame):
             if row_num >= target_row:
                 sheets_to_rename.append((sheet_name, base_name, row_num))
 
-            if row_num not in core_levels_by_row:
-                core_levels_by_row[row_num] = []
-            core_levels_by_row[row_num].append(sheet_name)
-
         # Sort sheets to rename by row number (descending to avoid conflicts)
         sheets_to_rename.sort(key=lambda x: x[2], reverse=True)
 
         try:
-            import pandas as pd
-            from openpyxl import load_workbook
+            import openpyxl
 
             file_path = self.parent.Data['FilePath']
 
-            # Read Excel file
-            wb = load_workbook(file_path)
-            data_frames = {}
-
-            # Store data for sheets that will be renamed
-            for sheet_name in self.parent.Data['Core levels']:
-                if sheet_name in wb.sheetnames:
-                    df = pd.read_excel(file_path, sheet_name=sheet_name)
-                    data_frames[sheet_name] = df
+            # Load workbook - do NOT read data content
+            wb = openpyxl.load_workbook(file_path)
 
             # Rename sheets in reverse order (highest row numbers first)
             renamed_sheets = {}
@@ -4100,13 +4365,18 @@ class FileManagerWindow(wx.Frame):
                 else:
                     new_name = f"{base_name}{new_row}" if new_row > 0 else base_name
 
-                # Update Data structure
-                if old_name in self.parent.Data['Core levels']:
-                    core_level_data = self.parent.Data['Core levels'][old_name]
-                    core_level_data['Name'] = new_name
-                    self.parent.Data['Core levels'][new_name] = core_level_data
-                    del self.parent.Data['Core levels'][old_name]
+                # Rename sheet tab only (not content)
+                if old_name in wb.sheetnames:
+                    sheet = wb[old_name]
+                    sheet.title = new_name
                     renamed_sheets[old_name] = new_name
+
+                    # Update internal data structure
+                    if old_name in self.parent.Data['Core levels']:
+                        self.parent.Data['Core levels'][new_name] = self.parent.Data['Core levels'].pop(old_name)
+
+            # Save workbook with renamed tabs
+            wb.save(file_path)
 
             # Update BE corrections - shift row numbers
             if 'BEcorrections' in self.parent.Data:
@@ -4130,30 +4400,18 @@ class FileManagerWindow(wx.Frame):
             self.sample_names = new_sample_names
             self.parent.Data['SampleNames'] = self.sample_names
 
-            # Write Excel file with new sheet names
-            with pd.ExcelWriter(file_path, engine='openpyxl', mode='w') as writer:
-                # Write all sheets with updated names
-                for old_name, df in data_frames.items():
-                    if old_name in renamed_sheets:
-                        new_name = renamed_sheets[old_name]
-                        df.to_excel(writer, sheet_name=new_name, index=False)
-                    else:
-                        df.to_excel(writer, sheet_name=old_name, index=False)
-
             # Update parent combobox
             current_sheet = self.parent.sheet_combobox.GetValue()
             self.parent.sheet_combobox.Clear()
             for sheet_name in sorted(self.parent.Data['Core levels'].keys()):
                 self.parent.sheet_combobox.Append(sheet_name)
 
-            # Update current selection if it was renamed
+            # Update current selection
             if current_sheet in renamed_sheets:
                 new_current = renamed_sheets[current_sheet]
                 self.parent.sheet_combobox.SetValue(new_current)
             elif current_sheet in self.parent.Data['Core levels']:
                 self.parent.sheet_combobox.SetValue(current_sheet)
-            elif self.parent.sheet_combobox.GetCount() > 0:
-                self.parent.sheet_combobox.SetSelection(0)
 
             # Save JSON file
             json_file_path = os.path.splitext(file_path)[0] + '.json'
@@ -4165,11 +4423,12 @@ class FileManagerWindow(wx.Frame):
             # Refresh grid
             self.populate_grid()
 
-            # self.parent.show_popup_message2("Success", f"Inserted row above row {target_row}. "
+            # self.parent.show_popup_message2("Success", f"Inserted row above {target_row}. "
             #                                            f"{len(sheets_to_rename)} sheets renamed.")
 
         except Exception as e:
-            self.parent.show_popup_message2("Error", f"Error inserting row: {str(e)}")
+            wx.MessageBox(f"Error inserting row: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
+
 
     def on_delete_row(self, target_row):
         """Delete all core levels in the target row and decrement higher row numbers"""
@@ -4214,7 +4473,7 @@ class FileManagerWindow(wx.Frame):
                     row_num = 0
             else:
                 # Regular core level parsing
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)(\d*)$', sheet_name)
+                match = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)(\d*)$', sheet_name)
                 if match:
                     base_name = match.group(1)
                     row_str = match.group(2)
@@ -4229,23 +4488,17 @@ class FileManagerWindow(wx.Frame):
         sheets_to_rename.sort(key=lambda x: x[2])
 
         try:
-            import pandas as pd
-            from openpyxl import load_workbook
+            import openpyxl
 
             file_path = self.parent.Data['FilePath']
 
-            # Read Excel file
-            wb = load_workbook(file_path)
-            data_frames = {}
+            # Load workbook - do NOT read data content
+            wb = openpyxl.load_workbook(file_path)
 
-            # Store data for sheets that will be kept
-            for sheet_name in self.parent.Data['Core levels']:
-                if sheet_name not in sheets_to_delete and sheet_name in wb.sheetnames:
-                    df = pd.read_excel(file_path, sheet_name=sheet_name)
-                    data_frames[sheet_name] = df
-
-            # Delete sheets from Data structure (only if row wasn't empty)
+            # Delete sheets from Excel file and Data structure
             for sheet_name in sheets_to_delete:
+                if sheet_name in wb.sheetnames:
+                    del wb[sheet_name]
                 if sheet_name in self.parent.Data['Core levels']:
                     del self.parent.Data['Core levels'][sheet_name]
                     self.parent.Data['Number of Core levels'] -= 1
@@ -4261,49 +4514,46 @@ class FileManagerWindow(wx.Frame):
                 else:
                     new_name = f"{base_name}{new_row}" if new_row > 0 else base_name
 
-                # Update Data structure
-                if old_name in self.parent.Data['Core levels']:
-                    core_level_data = self.parent.Data['Core levels'][old_name]
-                    core_level_data['Name'] = new_name
-                    self.parent.Data['Core levels'][new_name] = core_level_data
-                    del self.parent.Data['Core levels'][old_name]
+                # Rename sheet tab only (not content)
+                if old_name in wb.sheetnames:
+                    sheet = wb[old_name]
+                    sheet.title = new_name
                     renamed_sheets[old_name] = new_name
 
-                    # Update data_frames dict
-                    if old_name in data_frames:
-                        data_frames[new_name] = data_frames[old_name]
-                        del data_frames[old_name]
+                    # Update internal data structure
+                    if old_name in self.parent.Data['Core levels']:
+                        self.parent.Data['Core levels'][new_name] = self.parent.Data['Core levels'].pop(old_name)
 
-            # Update BE corrections - remove target row and shift higher rows
+            # Save workbook with renamed tabs
+            wb.save(file_path)
+
+            # Update BE corrections - shift row numbers down by 1
             if 'BEcorrections' in self.parent.Data:
                 new_be_corrections = {}
                 for row_str, correction in self.parent.Data['BEcorrections'].items():
                     row_num = int(row_str)
                     if row_num == target_row:
-                        continue  # Skip deleted row
+                        # Skip the deleted row
+                        continue
                     elif row_num > target_row:
                         new_be_corrections[str(row_num - 1)] = correction
                     else:
                         new_be_corrections[row_str] = correction
                 self.parent.Data['BEcorrections'] = new_be_corrections
 
-            # Update sample names - remove target row and shift higher rows
+            # Update sample names - shift row numbers down by 1
             new_sample_names = {}
             for row_str, name in self.sample_names.items():
                 row_num = int(row_str)
                 if row_num == target_row:
-                    continue  # Skip deleted row
+                    # Skip the deleted row
+                    continue
                 elif row_num > target_row:
                     new_sample_names[str(row_num - 1)] = name
                 else:
                     new_sample_names[row_str] = name
             self.sample_names = new_sample_names
             self.parent.Data['SampleNames'] = self.sample_names
-
-            # Write Excel file with updated sheet names (excluding deleted sheets)
-            with pd.ExcelWriter(file_path, engine='openpyxl', mode='w') as writer:
-                for sheet_name, df in data_frames.items():
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
 
             # Update parent combobox
             current_sheet = self.parent.sheet_combobox.GetValue()
@@ -4344,7 +4594,7 @@ class FileManagerWindow(wx.Frame):
             #                                                f"{len(sheets_to_rename)} sheets renumbered.")
 
         except Exception as e:
-            self.parent.show_popup_message2("Error", f"Error deleting row: {str(e)}")
+            wx.MessageBox(f"Error deleting row: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 
     def on_smooth_default(self, event):
         """Apply default gaussian smoothing with width 1"""
@@ -4373,6 +4623,7 @@ class FileManagerWindow(wx.Frame):
         try:
             from scipy.ndimage import gaussian_filter
             import re
+            import pandas as pd
             from libraries.ToolsMenu.PlotModWindow import PlotModWindow
 
             for sheet_name in selected_sheets:
@@ -4382,11 +4633,11 @@ class FileManagerWindow(wx.Frame):
                 x = self.parent.Data['Core levels'][sheet_name]['B.E.']
                 y = self.parent.Data['Core levels'][sheet_name]['Raw Data']
 
-                # Apply Gaussian smoothing with width 5
+                # Apply Gaussian smoothing with width 1
                 smoothed_y = gaussian_filter(y, sigma=1)
 
                 # Get base name for new sheet
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)', sheet_name)
+                match = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)', sheet_name)
                 base_name = match.group(1) if match else sheet_name
 
                 # Use existing utility method to find next available name
@@ -4407,6 +4658,19 @@ class FileManagerWindow(wx.Frame):
                 self.parent.Data['Core levels'][new_sheet_name] = new_core_level_data
                 self.parent.Data['Number of Core levels'] += 1
 
+                # Save to Excel file
+                df = pd.DataFrame({
+                    'BE': x if isinstance(x, list) else x.tolist(),
+                    'Corrected Data': smoothed_y.tolist() if hasattr(smoothed_y, 'tolist') else list(smoothed_y),
+                    'Raw Data': smoothed_y.tolist() if hasattr(smoothed_y, 'tolist') else list(smoothed_y),
+                    'Transmission': [1.0] * len(x)
+                })
+
+                # Save DataFrame to Excel
+                with pd.ExcelWriter(self.parent.Data['FilePath'], engine='openpyxl', mode='a',
+                                    if_sheet_exists='replace') as writer:
+                    df.to_excel(writer, sheet_name=new_sheet_name, index=False)
+
                 # Update sheet combobox
                 self.parent.sheet_combobox.Append(new_sheet_name)
 
@@ -4417,7 +4681,7 @@ class FileManagerWindow(wx.Frame):
 
             # Select first new smoothed sheet
             if selected_sheets:
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)', selected_sheets[0])
+                match = re.match(r'([A-Za-z-]+\d*[spdfg]*)', selected_sheets[0])
                 base_name = match.group(1) if match else selected_sheets[0]
                 plot_mod = PlotModWindow(self.parent)
                 new_name = plot_mod.get_earliest_row_name(base_name)
@@ -4443,7 +4707,7 @@ class FileManagerWindow(wx.Frame):
         # Create console window
         parent_pos = self.parent.GetPosition()
         parent_size = self.parent.GetSize()
-        console_frame = wx.Frame(self.parent, title="Multiplying by 1000", size=(300, 200))
+        console_frame = wx.Frame(self.parent, title="Multiplying Core Levels by 1000", size=(300, 200))
         console_frame.SetPosition((
             parent_pos.x + (parent_size.width - 300) // 2,
             parent_pos.y + (parent_size.height - 200) // 2
@@ -4458,6 +4722,7 @@ class FileManagerWindow(wx.Frame):
 
         try:
             import re
+            import pandas as pd
             from libraries.ToolsMenu.PlotModWindow import PlotModWindow
 
             for sheet_name in selected_sheets:
@@ -4471,7 +4736,7 @@ class FileManagerWindow(wx.Frame):
                 multiplied_y = [val * 1000 for val in y]
 
                 # Get base name for new sheet
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)', sheet_name)
+                match = re.match(r'([A-Za-z-]+(?:\d+[spdfg]+)?)', sheet_name)
                 base_name = match.group(1) if match else sheet_name
 
                 # Use existing utility method to find next available name
@@ -4492,6 +4757,19 @@ class FileManagerWindow(wx.Frame):
                 self.parent.Data['Core levels'][new_sheet_name] = new_core_level_data
                 self.parent.Data['Number of Core levels'] += 1
 
+                # Save to Excel file
+                df = pd.DataFrame({
+                    'BE': x if isinstance(x, list) else x.tolist(),
+                    'Corrected Data': multiplied_y,
+                    'Raw Data': multiplied_y,
+                    'Transmission': [1.0] * len(x)
+                })
+
+                # Save DataFrame to Excel
+                with pd.ExcelWriter(self.parent.Data['FilePath'], engine='openpyxl', mode='a',
+                                    if_sheet_exists='replace') as writer:
+                    df.to_excel(writer, sheet_name=new_sheet_name, index=False)
+
                 # Update sheet combobox
                 self.parent.sheet_combobox.Append(new_sheet_name)
 
@@ -4500,27 +4778,17 @@ class FileManagerWindow(wx.Frame):
             # Refresh grid
             self.populate_grid()
 
-            # Force clear plot limits before selecting new sheet
-            if hasattr(self.parent, 'plot_config') and hasattr(self.parent.plot_config, 'plot_limits'):
-                self.parent.plot_config.plot_limits.clear()
-
-            # Select first new multiplied sheet with proper refresh
+            # Select first new multiplied sheet
             if selected_sheets:
-                match = re.match(r'([A-Za-z]+\d*[spdfg]*)', selected_sheets[0])
+                match = re.match(r'([A-Za-z-]+\d*[spdfg]*)', selected_sheets[0])
                 base_name = match.group(1) if match else selected_sheets[0]
                 plot_mod = PlotModWindow(self.parent)
                 new_name = plot_mod.get_earliest_row_name(base_name)
                 self.parent.sheet_combobox.SetValue(new_name)
-
-                # Force a complete refresh
                 from libraries.Sheet_Operations import on_sheet_selected
                 on_sheet_selected(self.parent, new_name)
 
-                # Additional plot refresh
-                if hasattr(self.parent, 'plot_manager'):
-                    self.parent.plot_manager.clear_and_replot(self.parent)
-
-            update_console("Multiplication completed!")
+            update_console("Multiplication by 1000 completed!")
             wx.CallLater(1000, console_frame.Close)
 
         except Exception as e:
@@ -4688,3 +4956,527 @@ class ExperimentalDescriptionWindow(wx.Frame):
         except Exception as e:
             wx.MessageBox(f"Error loading experimental description: {str(e)}",
                           "Error", wx.OK | wx.ICON_ERROR)
+
+
+import wx
+import os
+import sys
+import re
+
+# Import necessary functions
+from libraries.FileMenu.Open import (
+    open_xlsx_file,
+    open_vamas_file,
+    open_kal_file,
+    open_avg_file_direct,
+    open_spe_file,
+    open_mrs_file,
+    open_vg_microtech_file,
+    import_avantage_file_direct,
+    import_avantage_file_direct_xls
+)
+
+
+class FileManagerDropTarget(wx.FileDropTarget):
+    def __init__(self, file_manager_window):
+        wx.FileDropTarget.__init__(self)
+        self.file_manager_window = file_manager_window
+        self.main_window = file_manager_window.parent
+
+    def OnDropFiles(self, x, y, filenames):
+
+
+        try:
+            import openpyxl
+            import xlrd
+        except ImportError as e:
+            wx.MessageBox(f"Required module missing: {e}", "Import Error", wx.OK | wx.ICON_ERROR)
+            return False
+
+        # Check all files are valid first
+        for file in filenames:
+            if not any(file.lower().endswith(ext) for ext in ['.xlsx', '.xls', '.vms', '.kal',
+                                                              '.avg', '.spe', '.mrs', '.1']):
+                wx.MessageBox(f"Only .xlsx/.xls (Khervefitting or Avantage), .vms (Vamas), "
+                              f".kal (Kratos), .avg (Thermo), .mrs, .1 (VG-Microtech) and .spe "
+                              f"(Phi) files can be dropped.", "Invalid File Type",
+                              wx.OK | wx.ICON_ERROR)
+                return False
+
+        # Special handling for single KherveFitting file
+        if len(filenames) == 1:
+            file = filenames[0]
+            if file.lower().endswith('.xlsx'):
+                if self._is_khervefitting_file(file):
+                    return self._handle_khervefitting_drop(file)
+
+        # Process each file normally for non-KherveFitting or multiple files
+        for file in filenames:
+            self._process_file(file)
+
+        return True
+
+    def _is_khervefitting_file(self, file_path):
+        """Check if the Excel file is a KherveFitting file (not Avantage)"""
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path)
+            is_khervefitting = "Titles" not in wb.sheetnames
+            wb.close()
+            return is_khervefitting
+        except Exception:
+            return False
+
+    def _handle_khervefitting_drop(self, file_path):
+        """Handle dropping a KherveFitting file with Open/Add dialog"""
+        file_name = os.path.basename(file_path)
+        current_file_name = "untitled"
+
+        # Get current file name if available
+        if hasattr(self.main_window, 'Data') and 'FilePath' in self.main_window.Data:
+            current_path = self.main_window.Data['FilePath']
+            if current_path:
+                current_file_name = os.path.splitext(os.path.basename(current_path))[0]
+
+        # Create dialog
+        dlg = wx.MessageDialog(
+            self.main_window,
+            f"What would you like to do with {file_name}?",
+            "File Action",
+            wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION
+        )
+
+        dlg.SetYesNoLabels(f"Open {file_name}", f"Add {file_name} to {current_file_name}")
+
+        result = dlg.ShowModal()
+        dlg.Destroy()
+
+        if result == wx.ID_YES:
+            # Open file normally
+            from libraries.FileMenu.Open import open_xlsx_file
+            wx.CallAfter(open_xlsx_file, self.main_window, file_path)
+        elif result == wx.ID_NO:
+            # Add to current file
+            wx.CallAfter(self._add_file_to_current, file_path)
+
+        return True
+
+    def _copy_sample_name(self, json_data_to_add, original_sample_row, target_row, file_path):
+        """Copy SampleName from source file or use filename"""
+        target_row_str = str(target_row)
+
+        # print(f"DEBUG: Processing sample row {original_sample_row} -> target row {target_row}")
+        # print(f"DEBUG: Target row string: '{target_row_str}'")
+
+        # Check if source file has SampleNames data
+        if 'SampleNames' in json_data_to_add and str(original_sample_row) in json_data_to_add['SampleNames']:
+            # Copy the existing SampleName from the source file
+            source_sample_name = json_data_to_add['SampleNames'][str(original_sample_row)]
+            self.main_window.Data['SampleNames'][target_row_str] = source_sample_name
+            # print(f"DEBUG: Copied SampleName: '{source_sample_name}' for row {target_row}")
+        else:
+            # Use filename as SampleName (without extension)
+            filename = os.path.splitext(os.path.basename(file_path))[0]
+            self.main_window.Data['SampleNames'][target_row_str] = filename
+            # print(f"DEBUG: Using filename as SampleName: '{filename}' for row {target_row}")
+
+        # Verify it was added
+        # print(f"DEBUG: Current SampleNames: {self.main_window.Data['SampleNames']}")
+
+    def _add_file_to_current(self, file_path):
+        """Add the dropped file's data to the current file, keeping sample rows together"""
+        try:
+            import openpyxl
+            import json
+            import os
+            import wx
+            from libraries.FileMenu.Save import convert_to_serializable_and_round
+            from libraries.Sheet_Operations import on_sheet_selected
+            from libraries.FileMenu.Open import open_xlsx_file  # Use open_xlsx_file instead of refresh_sheets
+
+            # Check if we have a current file open
+            if not hasattr(self.main_window, 'Data') or not self.main_window.Data.get('FilePath'):
+                wx.MessageBox("No file is currently open to add data to.", "Error", wx.OK | wx.ICON_ERROR)
+                return
+
+            current_file_path = self.main_window.Data['FilePath']
+            current_json_path = os.path.splitext(current_file_path)[0] + '.json'
+
+            # Load the file to be added
+            wb_to_add = openpyxl.load_workbook(file_path)
+            json_path_to_add = os.path.splitext(file_path)[0] + '.json'
+
+            # Load JSON data if it exists
+            json_data_to_add = {}
+            if os.path.exists(json_path_to_add):
+                with open(json_path_to_add, 'r') as f:
+                    json_data_to_add = json.load(f)
+
+            # Load current file
+            current_wb = openpyxl.load_workbook(current_file_path)
+
+            # Group sheets by their original sample row
+            sheets_by_sample = self._group_sheets_by_sample(wb_to_add.sheetnames)
+
+            # Process all sheets and add to Excel
+            sheets_added = []
+            sample_names_to_add = {}  # Store new sample names to add later
+
+            for sample_row, sheet_names in sheets_by_sample.items():
+                # print(f"DEBUG: Processing sample_row {sample_row} with sheets: {sheet_names}")
+
+                # Find next available row that can accommodate all core levels from this sample
+                target_row = self._find_next_available_row(sheet_names)
+                # print(f"DEBUG: Found target_row: {target_row}")
+
+                # Determine what SampleName to use for this target row
+                if 'SampleNames' in json_data_to_add and str(sample_row) in json_data_to_add['SampleNames']:
+                    sample_name = json_data_to_add['SampleNames'][str(sample_row)]
+                    # print(f"DEBUG: Using SampleName from source file: '{sample_name}'")
+                else:
+                    sample_name = os.path.splitext(os.path.basename(file_path))[0]
+                    # print(f"DEBUG: Using filename as SampleName: '{sample_name}'")
+
+                sample_names_to_add[str(target_row)] = sample_name
+                # print(f"DEBUG: Will add SampleName '{sample_name}' for row {target_row}")
+
+                # Process each sheet in this sample row
+                for sheet_name in sheet_names:
+                    # Get the new sheet name for this target row
+                    new_sheet_name = self._get_sheet_name_for_row(sheet_name, target_row)
+
+                    # Copy sheet EXACTLY with all formatting, charts, etc.
+                    source_sheet = wb_to_add[sheet_name]
+                    self._copy_sheet_exactly(source_sheet, current_wb, new_sheet_name)
+
+                    # Add to window.Data with file_path parameter
+                    self._add_sheet_to_data(sheet_name, new_sheet_name, source_sheet, json_data_to_add, file_path)
+                    sheets_added.append(new_sheet_name)
+
+            # Save the updated Excel file
+            current_wb.save(current_file_path)
+            current_wb.close()
+            wb_to_add.close()
+
+            # print(f"DEBUG: About to update SampleNames and interface manually")
+
+            # Update SampleNames in window.Data
+            if 'SampleNames' not in self.main_window.Data:
+                self.main_window.Data['SampleNames'] = {}
+
+            self.main_window.Data['SampleNames'].update(sample_names_to_add)
+            # print(f"DEBUG: SampleNames updated: {self.main_window.Data['SampleNames']}")
+
+            # Update interface manually (DON'T use open_xlsx_file)
+            # Update sheet combobox
+            current_sheet = self.main_window.sheet_combobox.GetValue()
+            all_sheets = list(self.main_window.Data['Core levels'].keys())
+            self.main_window.sheet_combobox.Clear()
+            self.main_window.sheet_combobox.AppendItems(all_sheets)
+
+            # Restore current sheet or set to first new sheet
+            if current_sheet in all_sheets:
+                self.main_window.sheet_combobox.SetValue(current_sheet)
+            elif sheets_added:
+                self.main_window.sheet_combobox.SetValue(sheets_added[0])
+                on_sheet_selected(self.main_window, sheets_added[0])
+
+            # Update number of core levels
+            self.main_window.Data['Number of Core levels'] = len(self.main_window.Data['Core levels'])
+
+            # Save JSON with final data
+            json_data = convert_to_serializable_and_round(self.main_window.Data)
+            with open(current_json_path, 'w') as json_file:
+                json.dump(json_data, json_file, indent=2)
+            # print(f"DEBUG: Final JSON saved with SampleNames: {json_data.get('SampleNames')}")
+
+            # Close and reopen the file manager if it exists
+            if hasattr(self.main_window, 'file_manager') and self.main_window.file_manager is not None:
+                try:
+                    self.main_window.file_manager.Close()
+                    self.main_window.file_manager.Destroy()
+                    self.main_window.file_manager = None
+
+                    import wx
+                    wx.CallAfter(self.main_window.on_open_file_manager, None)
+                except Exception as e:
+                    print(f"Error refreshing file manager: {e}")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            wx.MessageBox(f"Error adding file data: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
+
+    def _get_new_sheet_name(self, base_sheet_name):
+        """Get the proper new sheet name following the naming convention"""
+        existing_sheets = list(self.main_window.Data.get('Core levels', {}).keys())
+
+        # If the base name doesn't exist, use it as-is
+        if base_sheet_name not in existing_sheets:
+            return base_sheet_name
+
+        # If base name exists, find the next available number
+        # Start from 1 (C1s -> C1s1, C1s2, etc.)
+        counter = 1
+        while f"{base_sheet_name}{counter}" in existing_sheets:
+            counter += 1
+
+        return f"{base_sheet_name}{counter}"
+
+    def _group_sheets_by_sample(self, sheet_names):
+        """Group sheets by their sample row number"""
+        import re
+        sheets_by_sample = {}
+
+        for sheet_name in sheet_names:
+            # Skip non-core level sheets
+            if sheet_name in ["Experimental description", "Results Table"]:
+                continue
+
+            # Extract sample number from sheet name (C1s2 -> 2, C1s -> 0)
+            match = re.search(r'(\d+)$', sheet_name)
+            if match:
+                sample_num = int(match.group(1))
+            else:
+                sample_num = 0  # Default to row 0 if no number
+
+            if sample_num not in sheets_by_sample:
+                sheets_by_sample[sample_num] = []
+            sheets_by_sample[sample_num].append(sheet_name)
+
+        return sheets_by_sample
+
+    def _find_next_available_row(self, sheet_names_to_add):
+        """Find the next completely empty row that can fit all the core levels"""
+        existing_sheets = list(self.main_window.Data.get('Core levels', {}).keys())
+        print(f"DEBUG: Existing sheets: {existing_sheets}")
+
+        # Extract base names from sheets to add (C1s2 -> C1s)
+        base_names_to_add = []
+        import re
+        for sheet_name in sheet_names_to_add:
+            # Remove number suffix to get base name
+            base_name = re.sub(r'\d+$', '', sheet_name)
+            base_names_to_add.append(base_name)
+
+        print(f"DEBUG: Base names to add: {base_names_to_add}")
+
+        # Check each row starting from 0
+        row = 0
+        while True:
+            row_is_available = True
+            print(f"DEBUG: Checking row {row}")
+
+            # Check if this row can accommodate all our core levels
+            for base_name in base_names_to_add:
+                if row == 0:
+                    # For row 0, check both "C1s" and "C1s0" formats
+                    if base_name in existing_sheets or f"{base_name}0" in existing_sheets:
+                        print(f"DEBUG: Row {row} occupied by {base_name}")
+                        row_is_available = False
+                        break
+                else:
+                    # For other rows, check "C1s1", "C1s2", etc.
+                    if f"{base_name}{row}" in existing_sheets:
+                        print(f"DEBUG: Row {row} occupied by {base_name}{row}")
+                        row_is_available = False
+                        break
+
+            if row_is_available:
+                print(f"DEBUG: Row {row} is available!")
+                return row
+
+            row += 1
+
+    def _get_sheet_name_for_row(self, original_sheet_name, target_row):
+        """Get the proper sheet name for the target row"""
+        import re
+
+        # Remove number suffix to get base name
+        base_name = re.sub(r'\d+$', '', original_sheet_name)
+
+        if target_row == 0:
+            return base_name  # C1s, O1s, etc.
+        else:
+            return f"{base_name}{target_row}"  # C1s1, O1s1, etc.
+
+    def _get_next_sample_number(self):
+        """Find the next available sample number"""
+        max_sample_num = -1
+
+        if 'Core levels' in self.main_window.Data:
+            for sheet_name in self.main_window.Data['Core levels'].keys():
+                # Extract number from sheet names like "C1s0", "O1s1", etc.
+                import re
+                match = re.search(r'(\d+)$', sheet_name)
+                if match:
+                    sample_num = int(match.group(1))
+                    max_sample_num = max(max_sample_num, sample_num)
+
+        return max_sample_num + 1
+
+    def _add_sheet_to_data(self, original_sheet_name, new_sheet_name, source_sheet, json_data, file_path):
+        """Add sheet data to window.Data structure without individual descriptions"""
+        # Extract B.E. and Raw Data columns
+        be_values = []
+        raw_data = []
+
+        for row in range(2, source_sheet.max_row + 1):  # Skip header row
+            be_cell = source_sheet.cell(row=row, column=1)  # Column A
+            raw_cell = source_sheet.cell(row=row, column=2)  # Column B
+
+            if be_cell.value is not None and raw_cell.value is not None:
+                try:
+                    # Ensure all values are properly converted to float
+                    be_val = float(be_cell.value)
+                    raw_val = float(raw_cell.value)
+
+                    # Skip invalid values
+                    if not (isinstance(be_val, (int, float)) and isinstance(raw_val, (int, float))):
+                        continue
+
+                    be_values.append(be_val)
+                    raw_data.append(raw_val)
+                except (ValueError, TypeError):
+                    # Skip rows with invalid data
+                    continue
+
+        if not be_values or not raw_data:
+            print(f"Warning: No valid data found in sheet {original_sheet_name}")
+            return
+
+        # Create the data structure WITHOUT individual Description
+        sheet_data = {
+            'B.E.': be_values,
+            'Raw Data': raw_data,
+            'Background': {'Bkg Y': [0.0] * len(be_values)},
+            'Name': new_sheet_name
+            # REMOVED: 'Description': f"Added from file: {os.path.basename(file_path)}"
+        }
+
+        # Copy peak fitting data from JSON if available
+        if 'Core levels' in json_data and original_sheet_name in json_data['Core levels']:
+            original_data = json_data['Core levels'][original_sheet_name]
+
+            # Copy peak fitting information with data type validation
+            if 'Fitting' in original_data:
+                sheet_data['Fitting'] = original_data['Fitting']
+            if 'Peaks' in original_data:
+                sheet_data['Peaks'] = original_data['Peaks']
+            if 'Background' in original_data:
+                # Ensure background data is properly formatted
+                bg_data = original_data['Background']
+                if isinstance(bg_data, dict) and 'Bkg Y' in bg_data:
+                    try:
+                        # Convert background values to float
+                        bkg_y = [float(val) for val in bg_data['Bkg Y'] if val is not None]
+                        if len(bkg_y) == len(be_values):
+                            sheet_data['Background']['Bkg Y'] = bkg_y
+                    except (ValueError, TypeError):
+                        # Keep default background if conversion fails
+                        pass
+
+        # Add to window.Data
+        if 'Core levels' not in self.main_window.Data:
+            self.main_window.Data['Core levels'] = {}
+
+        self.main_window.Data['Core levels'][new_sheet_name] = sheet_data
+        self.main_window.Data['Number of Core levels'] = len(self.main_window.Data['Core levels'])
+
+    def _process_file(self, file):
+        """Process file normally (original logic)"""
+        from libraries.FileMenu.Open import import_avantage_file_direct, import_avantage_file_direct_xls
+
+        try:
+            if file.lower().endswith('.xlsx'):
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(file)
+                    if "Titles" in wb.sheetnames:
+                        wx.CallAfter(import_avantage_file_direct, self.main_window, file)
+                    else:
+                        wx.CallAfter(open_xlsx_file, self.main_window, file)
+                    wb.close()
+                except Exception as e:
+                    print(f"Error processing .xlsx file {file}: {e}")
+
+            elif file.lower().endswith('.xls'):
+                try:
+                    import xlrd
+                    wb = xlrd.open_workbook(file)
+                    if "Titles" in wb.sheet_names():
+                        wx.CallAfter(import_avantage_file_direct_xls, self.main_window, file)
+                    else:
+                        wx.CallAfter(open_xlsx_file, self.main_window, file)
+                    wb.close()
+                except Exception as e:
+                    print(f"Error processing .xls file {file}: {e}")
+
+            # Handle other file types as before...
+            elif file.lower().endswith('.vms'):
+                from libraries.FileMenu.Open import open_vamas_file
+                wx.CallAfter(open_vamas_file, self.main_window, file)
+            # ... (add other file types as in previous implementation)
+
+        except Exception as e:
+            wx.MessageBox(f"Error processing file {os.path.basename(file)}: {str(e)}",
+                          "File Processing Error", wx.OK | wx.ICON_ERROR)
+
+    def _copy_sheet_exactly(self, source_sheet, target_wb, new_sheet_name):
+        """Copy sheet exactly with all formatting, charts, fonts, colors, etc."""
+        from copy import copy
+        from openpyxl.utils import get_column_letter
+
+        # Create new sheet
+        target_sheet = target_wb.create_sheet(new_sheet_name)
+
+        # Copy all cell values and formatting
+        for row in source_sheet.iter_rows():
+            for cell in row:
+                new_cell = target_sheet.cell(row=cell.row, column=cell.column)
+
+                # Copy value
+                new_cell.value = cell.value
+
+                # Copy formatting if available
+                if cell.has_style:
+                    new_cell.font = copy(cell.font)
+                    new_cell.border = copy(cell.border)
+                    new_cell.fill = copy(cell.fill)
+                    new_cell.number_format = copy(cell.number_format)
+                    new_cell.protection = copy(cell.protection)
+                    new_cell.alignment = copy(cell.alignment)
+
+        # Copy column dimensions
+        for col in source_sheet.column_dimensions:
+            target_sheet.column_dimensions[col] = copy(source_sheet.column_dimensions[col])
+
+        # Copy row dimensions
+        for row in source_sheet.row_dimensions:
+            target_sheet.row_dimensions[row] = copy(source_sheet.row_dimensions[row])
+
+        # Copy merged cells
+        for merged_range in source_sheet.merged_cells.ranges:
+            target_sheet.merge_cells(str(merged_range))
+
+        # Copy charts and images
+        for chart in source_sheet._charts:
+            new_chart = copy(chart)
+            target_sheet.add_chart(new_chart, chart.anchor)
+
+        for image in source_sheet._images:
+            new_image = copy(image)
+            target_sheet.add_image(new_image, image.anchor)
+
+        # Copy sheet properties
+        target_sheet.sheet_format = copy(source_sheet.sheet_format)
+        target_sheet.sheet_properties = copy(source_sheet.sheet_properties)
+        target_sheet.page_setup = copy(source_sheet.page_setup)
+        target_sheet.print_options = copy(source_sheet.print_options)
+
+        # Copy conditional formatting
+        target_sheet.conditional_formatting = copy(source_sheet.conditional_formatting)
+
+        # Copy data validation
+        target_sheet.data_validations = copy(source_sheet.data_validations)
+

@@ -588,13 +588,45 @@ def save_to_excel(window, data, file_path, sheet_name, update_console=None):
 
             num_rows = len(x_values)
             num_peaks = data['peak_params_grid'].GetNumberRows() // 2
+
             for i in range(num_peaks):
                 row = i * 2
                 peak_label = data['peak_params_grid'].GetCellValue(row, 1)
                 if i < len(data['individual_peak_fits']):
                     reversed_peak = np.array(data['individual_peak_fits'][i])[::-1]
                     trimmed_peak = np.roll(reversed_peak, -1)[:num_rows]
-                    new_columns[peak_label] = trimmed_peak
+
+                    # Zero out peak data outside background regions for Excel export
+                    masked_peak = trimmed_peak.copy()
+
+                    # Get background regions from window
+                    sheet_name = window.sheet_combobox.GetValue()
+                    if (sheet_name in window.Data['Core levels'] and
+                            'Background' in window.Data['Core levels'][sheet_name] and
+                            'Recorded_Ranges' in window.Data['Core levels'][sheet_name]['Background']):
+
+                        recorded_ranges = window.Data['Core levels'][sheet_name]['Background']['Recorded_Ranges']
+
+                        if recorded_ranges:
+                            # Create mask for background regions
+                            x_values = data['x_values']
+                            region_mask = np.zeros(len(x_values), dtype=bool)
+
+                            for range_data in recorded_ranges:
+                                if len(range_data) >= 4:
+                                    offset_h, offset_l, min_range, max_range = range_data[:4]
+                                    try:
+                                        min_range = float(min_range)
+                                        max_range = float(max_range)
+                                        region_mask |= (x_values >= min(min_range, max_range)) & (x_values <= max(min_range, max_range))
+                                    except (ValueError, TypeError):
+                                        continue
+
+                            # Set values outside background regions to 0
+                            masked_peak[~region_mask] = np.nan
+
+                    new_columns[peak_label] = masked_peak
+
 
         # Now insert all columns at position 5
         col_pos = 5
@@ -642,7 +674,293 @@ def save_to_excel(window, data, file_path, sheet_name, update_console=None):
                     window.Data['Core levels'][sheet_name]['Fitting']:
                 d_param_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks'].get('D-parameter')
                 if d_param_data and 'Derivative' in d_param_data:
-                    existing_df.insert(7, 'Derivative', d_param_data['Derivative'])
+                    existing_df.insert(8, 'Derivative', d_param_data['Derivative'])
+
+        # Handle Fermi fitted curve data (check by grid, not selected_fitting_method)
+        fermi_found = False
+        if window.peak_params_grid.GetNumberRows() > 0:
+            for row in range(0, window.peak_params_grid.GetNumberRows(), 2):
+                fitting_model = window.peak_params_grid.GetCellValue(row, 13)
+                if fitting_model == "Fermi":
+                    fermi_found = True
+                    break
+
+        # Handle Fermi fitted curve data - simple padding approach
+        fermi_found = False
+        if window.peak_params_grid.GetNumberRows() > 0:
+            for row in range(0, window.peak_params_grid.GetNumberRows(), 2):
+                fitting_model = window.peak_params_grid.GetCellValue(row, 13)
+                if fitting_model == "Fermi":
+                    fermi_found = True
+                    break
+
+        if fermi_found:
+            if 'Fitting' in window.Data['Core levels'][sheet_name] and 'Peaks' in \
+                    window.Data['Core levels'][sheet_name]['Fitting']:
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                for peak_name, peak_data in peaks_data.items():
+                    if peak_data.get('Fitting Model') == 'Fermi':
+                        if 'Fitted_X' in peak_data and 'Fitted_Y' in peak_data:
+                            # Get dataframe length
+                            df_length = len(existing_df)
+
+                            # Pad Fermi data with NaN to match dataframe length
+                            fitted_x = peak_data['Fitted_X']
+                            fitted_y = peak_data['Fitted_Y']
+
+                            # Create full-length arrays with NaN padding
+                            fermi_x_padded = fitted_x + [np.nan] * (df_length - len(fitted_x))
+                            fermi_y_padded = fitted_y + [np.nan] * (df_length - len(fitted_y))
+
+                            # Truncate if somehow longer than dataframe
+                            fermi_x_padded = fermi_x_padded[:df_length]
+                            fermi_y_padded = fermi_y_padded[:df_length]
+
+                            existing_df.iloc[:, 8] = fermi_x_padded
+                            existing_df.iloc[:, 9] = fermi_y_padded
+                            # Update column names
+                            existing_df.columns.values[8] = 'Fermi_X'
+                            existing_df.columns.values[9] = 'Fermi_Y'
+                        break
+
+        # Handle VBM data
+        vbm_found = False
+        if window.peak_params_grid.GetNumberRows() > 0:
+            for row in range(0, window.peak_params_grid.GetNumberRows(), 2):
+                fitting_model = window.peak_params_grid.GetCellValue(row, 13)
+                if fitting_model == "VBM":
+                    vbm_found = True
+                    break
+
+        if vbm_found:
+            if 'Fitting' in window.Data['Core levels'][sheet_name] and 'Peaks' in \
+                    window.Data['Core levels'][sheet_name]['Fitting']:
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                for peak_name, peak_data in peaks_data.items():
+                    if peak_data.get('Fitting Model') == 'VBM':
+                        # Get dataframe length
+                        df_length = len(existing_df)
+
+                        # Add VBM parameters as separate columns
+                        vbm_position = [peak_data.get('Position', 0)] + [np.nan] * (df_length - 1)
+                        edge_center = [peak_data.get('VBM_Edge_Center', 0)] + [np.nan] * (df_length - 1)
+                        bg_center = [peak_data.get('VBM_BG_Center', 0)] + [np.nan] * (df_length - 1)
+
+                        # existing_df.insert(8, 'VBM_Position', vbm_position[:df_length])
+                        # existing_df.insert(9, 'VBM_Edge_Center', edge_center[:df_length])
+                        # existing_df.insert(10, 'VBM_BG_Center', bg_center[:df_length])
+                        existing_df.iloc[:, 8] = vbm_position[:df_length]
+                        existing_df.iloc[:, 9] = edge_center[:df_length]
+                        existing_df.iloc[:, 10] = bg_center[:df_length]
+
+                        # Also update column names
+                        existing_df.columns.values[8] = 'VBM_Position'
+                        existing_df.columns.values[9] = 'VBM_Edge_Center'
+                        existing_df.columns.values[10] = 'VBM_BG_Center'
+
+                        break
+
+        # Handle Cut-Off data
+        cutoff_found = False
+        if window.peak_params_grid.GetNumberRows() > 0:
+            for row in range(0, window.peak_params_grid.GetNumberRows(), 2):
+                fitting_model = window.peak_params_grid.GetCellValue(row, 13)
+                if fitting_model == "Cut-Off":
+                    cutoff_found = True
+                    break
+
+        if cutoff_found:
+            if 'Fitting' in window.Data['Core levels'][sheet_name] and 'Peaks' in \
+                    window.Data['Core levels'][sheet_name]['Fitting']:
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                for peak_name, peak_data in peaks_data.items():
+                    if peak_data.get('Fitting Model') == 'Cut-Off':
+                        # Get dataframe length
+                        df_length = len(existing_df)
+
+                        # Add Cut-Off parameters as separate columns
+                        cutoff_position = [peak_data.get('Position', 0)] + [np.nan] * (df_length - 1)
+                        edge_center = [peak_data.get('Cut-Off_Edge_Center', 0)] + [np.nan] * (df_length - 1)
+                        bg_center = [peak_data.get('Cut-Off_BG_Center', 0)] + [np.nan] * (df_length - 1)
+
+                        # Determine insertion position (after VBM columns if they exist)
+                        # If no VBM, Cut-Off goes to columns 8-10
+                        existing_df.iloc[:, 8] = cutoff_position[:df_length]
+                        existing_df.iloc[:, 9] = edge_center[:df_length]
+                        existing_df.iloc[:, 10] = bg_center[:df_length]
+
+                        existing_df.columns.values[8] = 'Cut-Off_Position'
+                        existing_df.columns.values[9] = 'Cut-Off_Edge_Center'
+                        existing_df.columns.values[10] = 'Cut-Off_BG_Center'
+                        break
+
+        # Handle VBM data
+        vbm_found = False
+        if window.peak_params_grid.GetNumberRows() > 0:
+            for row in range(0, window.peak_params_grid.GetNumberRows(), 2):
+                fitting_model = window.peak_params_grid.GetCellValue(row, 13)
+                if fitting_model == "VBM":
+                    vbm_found = True
+                    break
+
+        if vbm_found:
+            if 'Fitting' in window.Data['Core levels'][sheet_name] and 'Peaks' in \
+                    window.Data['Core levels'][sheet_name]['Fitting']:
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                for peak_name, peak_data in peaks_data.items():
+                    if peak_data.get('Fitting Model') == 'VBM':
+                        # Get dataframe length
+                        df_length = len(existing_df)
+
+                        # Get original data range for extrapolation lines
+                        x_values = window.x_values
+                        x_min, x_max = min(x_values), max(x_values)
+
+                        # Generate signal extrapolation line data
+                        signal_coef = peak_data.get('Signal_Coef')
+                        signal_extrap_x, signal_extrap_y = [], []
+                        if signal_coef and len(signal_coef) == 2:
+                            signal_extrap_x = np.linspace(x_min, x_max, 100).tolist()
+                            signal_extrap_y = [signal_coef[0] * x + signal_coef[1] for x in signal_extrap_x]
+
+                        # Get signal fit points
+                        signal_points_x = peak_data.get('X_Signal_Fit', [])
+                        signal_points_y = peak_data.get('Y_Signal_Fit', [])
+
+                        # Generate background extrapolation line data (if used)
+                        bg_coef = peak_data.get('BG_Coef')
+                        bg_extrap_x, bg_extrap_y = [], []
+                        if bg_coef and len(bg_coef) == 2:
+                            bg_extrap_x = np.linspace(x_min, x_max, 100).tolist()
+                            bg_extrap_y = [bg_coef[0] * x + bg_coef[1] for x in bg_extrap_x]
+
+                        # Get background fit points
+                        bg_points_x = peak_data.get('X_BG_Fit', [])
+                        bg_points_y = peak_data.get('Y_BG_Fit', [])
+
+                        # Pad all data arrays to match dataframe length
+                        def pad_data(data_list, target_length):
+                            if not data_list:
+                                return [np.nan] * target_length
+                            padded = data_list + [np.nan] * (target_length - len(data_list))
+                            return padded[:target_length]
+
+                        # Create padded arrays for all VBM data
+                        signal_extrap_x_padded = pad_data(signal_extrap_x, df_length)
+                        signal_extrap_y_padded = pad_data(signal_extrap_y, df_length)
+                        signal_points_x_padded = pad_data(signal_points_x, df_length)
+                        signal_points_y_padded = pad_data(signal_points_y, df_length)
+                        bg_extrap_x_padded = pad_data(bg_extrap_x, df_length)
+                        bg_extrap_y_padded = pad_data(bg_extrap_y, df_length)
+                        bg_points_x_padded = pad_data(bg_points_x, df_length)
+                        bg_points_y_padded = pad_data(bg_points_y, df_length)
+
+                        # # Insert VBM data starting from column 11
+                        # Direct assignment to columns 11-18
+                        existing_df.iloc[:, 11] = signal_extrap_x_padded
+                        existing_df.iloc[:, 12] = signal_extrap_y_padded
+                        existing_df.iloc[:, 13] = signal_points_x_padded
+                        existing_df.iloc[:, 14] = signal_points_y_padded
+                        existing_df.iloc[:, 15] = bg_extrap_x_padded
+                        existing_df.iloc[:, 16] = bg_extrap_y_padded
+                        existing_df.iloc[:, 17] = bg_points_x_padded
+                        existing_df.iloc[:, 18] = bg_points_y_padded
+
+                        # Update column names
+                        existing_df.columns.values[11] = 'VBM_Signal_Extrap_X'
+                        existing_df.columns.values[12] = 'VBM_Signal_Extrap_Y'
+                        existing_df.columns.values[13] = 'VBM_Signal_Points_X'
+                        existing_df.columns.values[14] = 'VBM_Signal_Points_Y'
+                        existing_df.columns.values[15] = 'VBM_BG_Extrap_X'
+                        existing_df.columns.values[16] = 'VBM_BG_Extrap_Y'
+                        existing_df.columns.values[17] = 'VBM_BG_Points_X'
+                        existing_df.columns.values[18] = 'VBM_BG_Points_Y'
+
+                        break
+
+        # Handle Cut-Off data
+        cutoff_found = False
+        if window.peak_params_grid.GetNumberRows() > 0:
+            for row in range(0, window.peak_params_grid.GetNumberRows(), 2):
+                fitting_model = window.peak_params_grid.GetCellValue(row, 13)
+                if fitting_model == "Cut-Off":
+                    cutoff_found = True
+                    break
+
+        if cutoff_found:
+            if 'Fitting' in window.Data['Core levels'][sheet_name] and 'Peaks' in \
+                    window.Data['Core levels'][sheet_name]['Fitting']:
+                peaks_data = window.Data['Core levels'][sheet_name]['Fitting']['Peaks']
+                for peak_name, peak_data in peaks_data.items():
+                    if peak_data.get('Fitting Model') == 'Cut-Off':
+                        # Get dataframe length
+                        df_length = len(existing_df)
+
+                        # Get original data range for extrapolation lines
+                        x_values = window.x_values
+                        x_min, x_max = min(x_values), max(x_values)
+
+                        # Generate signal extrapolation line data
+                        signal_coef = peak_data.get('Signal_Coef')
+                        signal_extrap_x, signal_extrap_y = [], []
+                        if signal_coef and len(signal_coef) == 2:
+                            signal_extrap_x = np.linspace(x_min, x_max, 100).tolist()
+                            signal_extrap_y = [signal_coef[0] * x + signal_coef[1] for x in signal_extrap_x]
+
+                        # Get signal fit points
+                        signal_points_x = peak_data.get('X_Signal_Fit', [])
+                        signal_points_y = peak_data.get('Y_Signal_Fit', [])
+
+                        # Generate background extrapolation line data (if used)
+                        bg_coef = peak_data.get('BG_Coef')
+                        bg_extrap_x, bg_extrap_y = [], []
+                        if bg_coef and len(bg_coef) == 2:
+                            bg_extrap_x = np.linspace(x_min, x_max, 100).tolist()
+                            bg_extrap_y = [bg_coef[0] * x + bg_coef[1] for x in bg_extrap_x]
+
+                        # Get background fit points
+                        bg_points_x = peak_data.get('X_BG_Fit', [])
+                        bg_points_y = peak_data.get('Y_BG_Fit', [])
+
+                        # Pad all data arrays to match dataframe length
+                        def pad_data(data_list, target_length):
+                            if not data_list:
+                                return [np.nan] * target_length
+                            padded = data_list + [np.nan] * (target_length - len(data_list))
+                            return padded[:target_length]
+
+                        # Create padded arrays for all Cut-Off data
+                        signal_extrap_x_padded = pad_data(signal_extrap_x, df_length)
+                        signal_extrap_y_padded = pad_data(signal_extrap_y, df_length)
+                        signal_points_x_padded = pad_data(signal_points_x, df_length)
+                        signal_points_y_padded = pad_data(signal_points_y, df_length)
+                        bg_extrap_x_padded = pad_data(bg_extrap_x, df_length)
+                        bg_extrap_y_padded = pad_data(bg_extrap_y, df_length)
+                        bg_points_x_padded = pad_data(bg_points_x, df_length)
+                        bg_points_y_padded = pad_data(bg_points_y, df_length)
+
+                        # Determine insertion position (after VBM columns if they exist)
+                        start_col = 11
+
+                        existing_df.iloc[:, start_col] = signal_extrap_x_padded
+                        existing_df.iloc[:, start_col + 1] = signal_extrap_y_padded
+                        existing_df.iloc[:, start_col + 2] = signal_points_x_padded
+                        existing_df.iloc[:, start_col + 3] = signal_points_y_padded
+                        existing_df.iloc[:, start_col + 4] = bg_extrap_x_padded
+                        existing_df.iloc[:, start_col + 5] = bg_extrap_y_padded
+                        existing_df.iloc[:, start_col + 6] = bg_points_x_padded
+                        existing_df.iloc[:, start_col + 7] = bg_points_y_padded
+
+                        # Update column names
+                        existing_df.columns.values[start_col] = 'Cut-Off_Signal_Extrap_X'
+                        existing_df.columns.values[start_col + 1] = 'Cut-Off_Signal_Extrap_Y'
+                        existing_df.columns.values[start_col + 2] = 'Cut-Off_Signal_Points_X'
+                        existing_df.columns.values[start_col + 3] = 'Cut-Off_Signal_Points_Y'
+                        existing_df.columns.values[start_col + 4] = 'Cut-Off_BG_Extrap_X'
+                        existing_df.columns.values[start_col + 5] = 'Cut-Off_BG_Extrap_Y'
+                        existing_df.columns.values[start_col + 6] = 'Cut-Off_BG_Points_X'
+                        existing_df.columns.values[start_col + 7] = 'Cut-Off_BG_Points_Y'
+                        break
 
         # Restore experimental data columns if they were present
         if exp_data_columns:
@@ -741,217 +1059,6 @@ def save_to_excel(window, data, file_path, sheet_name, update_console=None):
             window.canvas.draw_idle()
 
 
-def refresh_sheets_OLD(window, on_sheet_selected_func):
-    if 'FilePath' not in window.Data or not window.Data['FilePath']:
-        wx.MessageBox("No file currently open. Please open a file first.", "Error", wx.OK | wx.ICON_ERROR)
-        return
-
-    current_sheet = window.sheet_combobox.GetValue()
-    file_path = window.Data['FilePath']
-
-    try:
-        import re
-        # Save BEcorrections data
-        be_corrections = window.Data.get('BEcorrections', {}).copy() if 'BEcorrections' in window.Data else {}
-
-        # Save current state to JSON
-        json_file_path = os.path.splitext(file_path)[0] + '.json'
-        json_data = convert_to_serializable_and_round(window.Data)
-        with open(json_file_path, 'w') as json_file:
-            json.dump(json_data, json_file, indent=2)
-
-        # Reopen the XLSX file
-        excel_file = pd.ExcelFile(file_path)
-        all_sheet_names = excel_file.sheet_names
-
-        # Filter out "Results Table" and "Experimental Description" sheets
-        sheet_names = [name for name in all_sheet_names if
-                       name.lower() not in ["results table", "experimental description"]]
-
-        # Normalize sheet names
-        name_changes = {}
-        for old_name in sheet_names:
-            new_name = old_name
-
-            lower_name = old_name.lower()
-            if 'survey' in lower_name:
-                new_name = 'Survey'
-            elif 'xps survey' in lower_name:
-                    new_name = 'Survey'
-            elif 'survey scan' in lower_name:
-                    new_name = 'Survey'
-            elif 'xps' in lower_name:
-                    new_name = 'Survey'
-            elif 'wide' in lower_name:
-                new_name = 'Wide'
-            elif 'wide scan' in lower_name:
-                new_name = 'Wide'
-            else:
-                # Remove spaces between element and orbital (e.g., "C 1s" → "C1s")
-                match = re.search(r'([A-Z][a-z]?)\s+(\d+[spdf])', old_name)
-                if match:
-                    element, orbital = match.groups()
-                    new_name = f"{element}{orbital}"
-
-                # Simplify names like "C1s Scan" to just "C1s"
-                match = re.search(r'([A-Z][a-z]?\d+[spdf])', new_name)
-                if match and len(new_name) > len(match.group(1)):
-                    new_name = match.group(1)
-
-            # Preserve sample number suffix if it exists
-            suffix_match = re.search(r'(\d+)$', old_name)
-            if suffix_match and not re.search(r'\d+$', new_name):
-                new_name = f"{new_name}{suffix_match.group(1)}"
-
-            if new_name != old_name:
-                name_changes[old_name] = new_name
-
-        # Rename sheets in Excel file if needed
-        if name_changes:
-            wb = openpyxl.load_workbook(file_path)
-            for old_name, new_name in name_changes.items():
-                if old_name in wb.sheetnames and new_name not in wb.sheetnames:
-                    sheet = wb[old_name]
-                    sheet.title = new_name
-            wb.save(file_path)
-
-            # Reopen Excel file to get updated sheet names
-            excel_file = pd.ExcelFile(file_path)
-            all_sheet_names = excel_file.sheet_names
-            sheet_names = [name for name in all_sheet_names if
-                           name.lower() not in ["results table", "experimental description"]]
-
-            # Update window.Data with new sheet names
-            updated_core_levels = {}
-            for old_name, new_name in name_changes.items():
-                if old_name in window.Data['Core levels']:
-                    updated_core_levels[new_name] = window.Data['Core levels'][old_name]
-
-                    # Update plot_config data structures
-                    if hasattr(window, 'plot_config'):
-                        # Update plot_limits
-                        if old_name in window.plot_config.plot_limits:
-                            window.plot_config.plot_limits[new_name] = window.plot_config.plot_limits.pop(old_name)
-
-                        # Update original_limits - THIS IS THE FIX
-                        if hasattr(window.plot_config,
-                                   'original_limits') and old_name in window.plot_config.original_limits:
-                            window.plot_config.original_limits[new_name] = window.plot_config.original_limits.pop(
-                                old_name)
-
-            # Add any remaining sheets that weren't renamed
-            for name in window.Data['Core levels']:
-                if name not in name_changes and name not in updated_core_levels:
-                    updated_core_levels[name] = window.Data['Core levels'][name]
-
-            window.Data['Core levels'] = updated_core_levels
-
-        # Update sheet names in the combobox
-        window.sheet_combobox.Clear()
-        window.sheet_combobox.AppendItems(sheet_names)
-
-        # Update window.Data with new sheet information
-        for sheet_name in sheet_names:
-            if sheet_name not in window.Data['Core levels']:
-                window.Data = add_core_level_Data(window.Data, window, file_path, sheet_name)
-
-        # Remove any sheets from window.Data that no longer exist in the Excel file
-        sheets_to_remove = set(window.Data['Core levels'].keys()) - set(sheet_names)
-        for sheet_name in sheets_to_remove:
-            del window.Data['Core levels'][sheet_name]
-
-        # Update the number of core levels
-        window.Data['Number of Core levels'] = len(sheet_names)
-
-        # Update B.E. and Raw Data with current Excel data
-        import re
-        for sheet_name in sheet_names:
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
-            raw_be_values = df.iloc[:, 0].tolist()
-
-            # Get BE correction for this sheet
-            sheet_correction = 0  # Default if no correction found
-
-            # Extract row number from sheet name
-            match = re.search(r'(\d+)$', sheet_name)
-
-            if match and be_corrections:
-                # Sheet name ends with a number
-                sample_row = match.group(1)
-                if sample_row in be_corrections:
-                    sheet_correction = be_corrections[sample_row]
-            elif be_corrections and "0" in be_corrections:
-                # Sheet name doesn't end with a number - treat as row "0"
-                sheet_correction = be_corrections["0"]
-
-            # Apply the sheet-specific BE correction
-            window.Data['Core levels'][sheet_name]['B.E.'] = [be + sheet_correction for be in raw_be_values]
-            window.Data['Core levels'][sheet_name]['Raw Data'] = df.iloc[:, 1].tolist()
-
-        # Restore BE corrections data
-        if be_corrections:
-            window.Data['BEcorrections'] = be_corrections
-
-        # Handle current sheet selection after normalization
-        if current_sheet in name_changes:
-            current_sheet = name_changes[current_sheet]
-
-        # Set the current sheet as selected if it still exists, otherwise select the first sheet
-        if current_sheet in sheet_names:
-            window.sheet_combobox.SetValue(current_sheet)
-        elif sheet_names:
-            window.sheet_combobox.SetValue(sheet_names[0])
-            current_sheet = sheet_names[0]
-
-        # Update the spinbox value for the current sheet
-        if current_sheet:
-            match = re.search(r'(\d+)$', current_sheet)
-            if match and be_corrections and match.group(1) in be_corrections:
-                window.be_correction = be_corrections[match.group(1)]
-            elif be_corrections and "0" in be_corrections:
-                # For sheets without a number suffix, use correction from row "0"
-                window.be_correction = be_corrections["0"]
-            else:
-                window.be_correction = 0
-
-            window.be_correction_spinbox.SetValue(window.be_correction)
-
-        # Initialize plot limits for new sheets
-        for sheet_name in sheet_names:
-            if hasattr(window, 'plot_config') and sheet_name not in window.plot_config.plot_limits:
-                # This will update both plot_limits and original_limits
-                window.plot_config.update_plot_limits(window, sheet_name)
-
-        # Update the plot for the current sheet
-        event = wx.CommandEvent(wx.EVT_COMBOBOX.typeId)
-        event.SetString(current_sheet)
-        on_sheet_selected_func(window, event)
-
-        # Update plot limits for the current sheet
-        if hasattr(window, 'plot_config'):
-            window.plot_config.update_plot_limits(window, current_sheet)
-
-        # Refresh the plot
-        window.plot_manager.plot_data(window)
-        window.clear_and_replot()
-
-        # If there were any name changes, show them in the message
-        if name_changes:
-            changes_msg = "\n".join([f"{old} → {new}" for old, new in name_changes.items()])
-            # wx.MessageBox(f"Sheets refreshed and normalized:\n{changes_msg}\n\nTotal sheets: {len(sheet_names)}",
-            #               "Success", wx.OK | wx.ICON_INFORMATION)
-            window.show_popup_message2(f"Sheets refreshed and normalized:\n{changes_msg}\n\nTotal sheets: {len(sheet_names)}", "Success")
-        else:
-            # wx.MessageBox(f"Sheets refreshed. Total sheets: {len(sheet_names)}", "Success", wx.OK | wx.ICON_INFORMATION)
-            window.show_popup_message2(
-                f"Sheets refreshed. Total sheets: {len(sheet_names)}", "Success")
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        wx.MessageBox(f"Error refreshing sheets: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
-
-
 def refresh_sheets(window, on_sheet_selected_func, update_console=None):
     if 'FilePath' not in window.Data or not window.Data['FilePath']:
         wx.MessageBox("No file currently open. Please open a file first.", "Error", wx.OK | wx.ICON_ERROR)
@@ -984,6 +1091,10 @@ def refresh_sheets(window, on_sheet_selected_func, update_console=None):
 
         # Save BEcorrections data
         be_corrections = window.Data.get('BEcorrections', {}).copy() if 'BEcorrections' in window.Data else {}
+
+        # PRESERVE SampleNames data (NEW CODE - this was missing!)
+        sample_names = window.Data.get('SampleNames', {}).copy() if 'SampleNames' in window.Data else {}
+        # print(f"DEBUG: Preserving SampleNames during refresh: {sample_names}")
 
         # Save current state to JSON
         update_console("Saving current state to JSON...")
@@ -1127,6 +1238,11 @@ def refresh_sheets(window, on_sheet_selected_func, update_console=None):
         # Restore BE corrections data
         if be_corrections:
             window.Data['BEcorrections'] = be_corrections
+
+        # RESTORE SampleNames data (NEW CODE - this was missing!)
+        if sample_names:
+            window.Data['SampleNames'] = sample_names
+            print(f"DEBUG---: Restored SampleNames after refresh: {window.Data['SampleNames']}")
 
         # Handle current sheet selection after normalization
         if current_sheet in name_changes:

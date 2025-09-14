@@ -60,7 +60,7 @@ def on_about(self, event):
 
     name = wx.StaticText(panel, label="KherveFitting")
     name.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
-    version = wx.StaticText(panel, label="Version 1.5 May 25")
+    version = wx.StaticText(panel, label="Version 1.6 Sept 25")
 
     button_grid = wx.GridBagSizer(2, 2)
     libraries_button = wx.Button(panel, label="Libraries Used")
@@ -80,7 +80,7 @@ def on_about(self, event):
     website = wx.adv.HyperlinkCtrl(panel, -1, "Imperial College Profile",
                                    "https://www.imperial.ac.uk/people/g.kerherve")
     website2 = wx.adv.HyperlinkCtrl(panel, -1, "LinkedIn Profile",
-                                    "https://www.linkedin.com/in/gkerherve/")
+                                    "https://www.linkedin.com/in/gwilherm-kerherve-3588b978/")
 
     # Add the websites to the horizontal sizer with some spacing
     website_sizer.Add(website, 0, wx.RIGHT, 10)
@@ -88,7 +88,7 @@ def on_about(self, event):
 
     developers = wx.StaticText(panel,
                                label="Developed by:\nG. Kerherve / g.kerherve@imperial.ac.uk\n"
-                                     "Julian A. Hochhaus / Dortmund")
+                                     "Julian A. Hochhaus / University of Dortmund")
     Testers = wx.StaticText(panel, label="Tested by:\nWilliam Skinner, Hideki Nakajima, "
                                          "Arthur Graf,"
                                          "\nDavid Morgan, Mark A. Isaacs, "
@@ -342,7 +342,6 @@ def show_shortcuts(parent):
     <li><b>Ctrl+Y:</b> Redo</li>
     <li><b>Ctrl+S:</b> Save. Only works on the grid and not on the figure canvas</li>
     <li><b>Ctrl+P:</b> Open peak fitting window</li>
-    <li><b>Ctrl+A:</b> Open Area window</li>
     <li><b>Ctrl+K:</b> Show Keyboard shortcut</li>
     <li><b>Alt+Up:</b> Increase peak intensity</li>
     <li><b>Alt+Down:</b> Decrease peak intensity</li>
@@ -419,14 +418,34 @@ Philosophy:
 -v1.3 Dec-24  - Towards true Atomic concentration (TPP-2M, IMFP, Transmission)
 -v1.4 Feb-25  - Towards Mac Version
 -v1.5 May-25  - Towards multi-samples 2D-Manager
--v1.6 Jun-25  - Towards opening/saving fitted CasaXPS data
+-v1.6 xxx-25  - Towards opening/saving fitted CasaXPS / Better Background management
 -v1.7 xxx-25  - Automatic Survey identification
 -v1.8 xxx-25  - Towards Linux Version (Synchrotron)
+
+Version 1.600-1.690
+- Improve Smart background
+- Added U2 Tougaard
+- Improve U4 Tougaard window
+- Improve peak, envelope, residuals visualisation / to be just in between the defined regions
+- Added missing elements in the AreaFit library
+- Improve average visualisation
 
 Version 1.505-1.590
 - Added opening peak fitted CasaXPS files - Beta
 - Added export peak fitted CasaXPS files - Beta
+- Added better background management
 - Added Thickogram - Beta
+- Added VBM / Cut-off / Fermi measurement
+- Added Automatic Survey identification
+- Added possibility to constraint to other core levels
+- Added named doublet peaks
+- Improve right click Menu in the peak fitting grid with other core level constraints
+- Improve vLines in background creation
+- Improve the AreaFit window 
+- Improve RSD calculation
+- Added several ways to import multiple files
+- Added noise creation in plotMod - HIDDEN DANGEROUS
+- Added voigt model creation in PlotMod - HIDDEN DANGEROUS
 - v1.545 Fix wrong value for vamas corrected intensity with new transmission value
 - Added shirley bkg of lmfitXPS 
 - Added Add/Delete core level in the Peak Fitting Grid

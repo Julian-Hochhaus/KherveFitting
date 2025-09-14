@@ -10,165 +10,198 @@ import platform
 class MouseEventHandler:
     def __init__(self, window):
         self.window = window
+        # Add these new variables for CTRL+drag functionality
+        self.ctrl_drag_active = False
+        self.vline_gap = 0.0
+        self.ctrl_drag_reference_pos = 0.0
+
+        self.center_drag_active = False
+        self.center_drag_reference_pos = 0.0
 
     def on_mouse_move(self, event):
         if event.inaxes:
             x, y = event.xdata, event.ydata
             if self.window.energy_scale == 'KE':
-                self.window.SetStatusText(f"KE: {x:.1f} eV, I: {int(y)} CPS", 1)
+                self.window.SetStatusText(f"KE: {x:.3f} eV, I: {y:.3f} CPS", 1)
                 self.window.current_energy_value = x
             else:
-                self.window.SetStatusText(f"BE: {x:.1f} eV, I: {int(y)} CPS", 1)
+                self.window.SetStatusText(f"BE: {x:.3f} eV, I: {y:.3f} CPS", 1)
                 self.window.current_energy_value = x
 
-    def on_click_OLD(self, event):
-        if event.inaxes:
-            x_click = event.xdata
-            if event.button == 1 and event.key == 'shift' and self.window.background_tab_selected:
-                self.window.motion_notify_id = self.window.canvas.mpl_connect('motion_notify_event', self.on_motion)
-                self.window.button_release_id = self.window.canvas.mpl_connect('button_release_event', self.on_release)
+    def insert_cross_core_constraint(self, constraint_ref, row, col):
+        """Insert a cross-core-level constraint into the specified cell"""
+        # Save state for undo
+        from libraries.FileMenu.Save import save_state
+        save_state(self.window)
 
-                x_click = event.xdata
-                sheet_name = self.window.sheet_combobox.GetValue()
-                if self.window.vline1 is not None and self.window.vline2 is not None:
-                    vline1_x = self.window.vline1.get_xdata()[0]
-                    vline2_x = self.window.vline2.get_xdata()[0]
+        # Determine if we're on a parameter row or constraint row
+        if row % 2 == 0:  # Parameter row - insert into constraint row below
+            constraint_row = row + 1
+            parameter_row = row
+        else:  # Constraint row - use this row
+            constraint_row = row
+            parameter_row = row - 1
 
-                    low_be_x = min(vline1_x, vline2_x)
-                    high_be_x = max(vline1_x, vline2_x)
+        # Parse the constraint reference (e.g., "C1s_A")
+        core_level_name, peak_letter = constraint_ref.split('_')
 
-                    dist1 = abs(x_click - vline1_x)
-                    dist2 = abs(x_click - vline2_x)
+        # Get the referenced peak data
+        if core_level_name in self.window.Data['Core levels']:
+            core_level_data = self.window.Data['Core levels'][core_level_name]
 
-                    if dist1 < dist2:
-                        raw_y = self.window.y_values[np.argmin(np.abs(self.window.x_values - vline1_x))]
-                        if vline1_x == low_be_x:
-                            calculated_offset = event.ydata - raw_y
-                            # Ensure offset cannot be positive
-                            self.window.offset_l = min(calculated_offset, 0)
-                            self.window.Data['Core levels'][sheet_name]['Background'][
-                                'Bkg Offset Low'] = self.window.offset_l
-                            self.window.fitting_window.offset_l_text.SetValue(f'{self.window.offset_l:.1f}')
+            if ('Fitting' in core_level_data and
+                    'Peaks' in core_level_data['Fitting']):
+
+                peaks = core_level_data['Fitting']['Peaks']
+                peak_keys = list(peaks.keys())
+                peak_index = ord(peak_letter) - ord('A')
+
+                if peak_index < len(peak_keys):
+                    peak_key = peak_keys[peak_index]
+                    ref_peak_data = peaks[peak_key]
+
+                    if col == 2:  # Position constraint
+                        # Get current position and reference position
+                        current_pos = float(self.window.peak_params_grid.GetCellValue(parameter_row, col))
+                        ref_pos = float(ref_peak_data.get('Position', current_pos))
+
+                        # Calculate difference
+                        difference = current_pos - ref_pos
+
+                        # Create constraint string
+                        if difference >= 0:
+                            constraint_value = f"{constraint_ref}+{difference:.2f}#0.1"
                         else:
-                            calculated_offset = event.ydata - raw_y
-                            # Ensure offset cannot be positive
-                            self.window.offset_h = min(calculated_offset, 0)
-                            self.window.Data['Core levels'][sheet_name]['Background'][
-                                'Bkg Offset High'] = self.window.offset_h
-                            self.window.fitting_window.offset_h_text.SetValue(f'{self.window.offset_h:.1f}')
-                    else:
-                        raw_y = self.window.y_values[np.argmin(np.abs(self.window.x_values - vline2_x))]
-                        if vline2_x == low_be_x:
-                            calculated_offset = event.ydata - raw_y
-                            # Ensure offset cannot be positive
-                            self.window.offset_l = min(calculated_offset, 0)
-                            self.window.Data['Core levels'][sheet_name]['Background'][
-                                'Bkg Offset Low'] = self.window.offset_l
-                            self.window.fitting_window.offset_l_text.SetValue(f'{self.window.offset_l:.1f}')
+                            constraint_value = f"{constraint_ref}{difference:.2f}#0.1"  # difference is already negative
+
+                    elif col == 6:  # Area constraint
+                        # Get current area and reference area for ratio calculation
+                        current_area = float(self.window.peak_params_grid.GetCellValue(parameter_row, col))
+                        ref_area = float(ref_peak_data.get('Area', current_area))
+
+                        # Calculate ratio
+                        ratio = (current_area / ref_area) if ref_area != 0 else 1
+
+                        if ratio != 1:
+                            constraint_value = f"{constraint_ref}*{ratio:.2f}#0.01"
                         else:
-                            calculated_offset = event.ydata - raw_y
-                            # Ensure offset cannot be positive
-                            self.window.offset_h = min(calculated_offset, 0)
-                            self.window.Data['Core levels'][sheet_name]['Background'][
-                                'Bkg Offset High'] = self.window.offset_h
-                            self.window.fitting_window.offset_h_text.SetValue(f'{self.window.offset_h:.1f}')
-                    self.window.plot_manager.plot_background(self.window)
-                    return
-            elif event.button == 1:
-                if event.key == 'shift':
-                    if self.window.peak_fitting_tab_selected and self.window.selected_peak_index is not None:
-                        row = self.window.selected_peak_index * 2
-                        self.window.initial_fwhm = float(self.window.peak_params_grid.GetCellValue(row, 4))
-                        self.window.initial_x = event.xdata
-                        self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event',
-                                                                                self.window.peak_manipulation.on_cross_drag)
-                        self.window.release_cid = self.window.canvas.mpl_connect('button_release_event',
-                                                                                 self.window.peak_manipulation.on_cross_release)
-                elif self.window.background_tab_selected:
-                    self.window.peak_manipulation.deselect_all_peaks()
+                            constraint_value = f"{constraint_ref}*1"
+
+                    else:  # FWHM, Sigma, Gamma, Height, L/G, Skew
+                        # For non-position/area parameters, just add *1
+                        constraint_value = f"{constraint_ref}*1"
+
+                    # Insert the constraint into the constraint cell
+                    self.window.peak_params_grid.SetCellValue(constraint_row, col, constraint_value)
+
+                    # Update the data structure
                     sheet_name = self.window.sheet_combobox.GetValue()
                     if sheet_name in self.window.Data['Core levels']:
-                        core_level_data = self.window.Data['Core levels'][sheet_name]
-                        if self.window.background_method == "Multi-Regions Smart":
-                            if self.window.vline1 is not None and self.window.vline2 is not None:
-                                vline1_x = self.window.vline1.get_xdata()[0]
-                                vline2_x = self.window.vline2.get_xdata()[0]
+                        fitting_data = self.window.Data['Core levels'][sheet_name].get('Fitting', {})
+                        peaks_data = fitting_data.get('Peaks', {})
 
-                                dist1 = abs(x_click - vline1_x)
-                                dist2 = abs(x_click - vline2_x)
+                        current_peak_index = constraint_row // 2  # Use constraint_row for peak index
+                        peak_keys_current = list(peaks_data.keys())
 
-                                if dist1 < dist2 and dist1 < self.window.some_threshold:
-                                    self.window.moving_vline = self.window.vline1
-                                elif dist2 < self.window.some_threshold:
-                                    self.window.moving_vline = self.window.vline2
-                                else:
-                                    self.window.moving_vline = None
+                        if current_peak_index < len(peak_keys_current):
+                            current_peak_key = peak_keys_current[current_peak_index]
 
-                                if self.window.moving_vline is not None:
-                                    self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event',
-                                                                                            self.on_motion)
-                                    self.window.release_cid = self.window.canvas.mpl_connect('button_release_event',
-                                                                                             self.on_release)
-                                    return
+                            if 'Constraints' not in peaks_data[current_peak_key]:
+                                peaks_data[current_peak_key]['Constraints'] = {}
 
-                        if self.window.vline1 is None:
-                            self.window.vline1 = self.window.ax.axvline(x_click, color='r', linestyle='--')
-                            core_level_data['Background']['Bkg Low'] = float(x_click)
-                        elif self.window.vline2 is None and abs(
-                                x_click - core_level_data['Background']['Bkg Low']) > self.window.some_threshold:
-                            self.window.vline2 = self.window.ax.axvline(x_click, color='r', linestyle='--')
-                            core_level_data['Background']['Bkg High'] = float(x_click)
-                            core_level_data['Background']['Bkg Low'], core_level_data['Background'][
-                                'Bkg High'] = sorted([
-                                core_level_data['Background']['Bkg Low'],
-                                core_level_data['Background']['Bkg High']
-                            ])
-                        else:
-                            self.window.moving_vline = self.window.vline1 if self.window.vline2 is None or abs(
-                                x_click - core_level_data['Background']['Bkg Low']) < abs(
-                                x_click - core_level_data['Background']['Bkg High']) else self.window.vline2
-                            self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event',
-                                                                                    self.on_motion)
-                            self.window.release_cid = self.window.canvas.mpl_connect('button_release_event',
-                                                                                     self.on_release)
-                elif self.window.noise_tab_selected:
-                    if self.window.vline3 is None:
-                        self.window.vline3 = self.window.ax.axvline(x_click, color='b', linestyle='--')
-                        self.window.noise_min_energy = float(x_click)
-                    elif self.window.vline4 is None and abs(
-                            x_click - self.window.noise_min_energy) > self.window.some_threshold:
-                        self.window.vline4 = self.window.ax.axvline(x_click, color='b', linestyle='--')
-                        self.window.noise_max_energy = float(x_click)
-                        self.window.noise_min_energy, self.window.noise_max_energy = sorted(
-                            [self.window.noise_min_energy, self.window.noise_max_energy])
-                    else:
-                        self.window.moving_vline = self.window.vline3 if self.window.vline4 is None or abs(
-                            x_click - self.window.noise_min_energy) < abs(
-                            x_click - self.window.noise_max_energy) else self.window.vline4
-                        self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event', self.on_motion)
-                        self.window.release_cid = self.window.canvas.mpl_connect('button_release_event',
-                                                                                 self.on_release)
-                elif self.window.peak_fitting_tab_selected:
-                    peak_index = self.window.peak_manipulation.get_peak_index_from_position(event.xdata, event.ydata)
-                    if peak_index is not None:
-                        self.window.selected_peak_index = peak_index
-                        self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event',
-                                                                                self.window.peak_manipulation.on_cross_drag)
-                        self.window.release_cid = self.window.canvas.mpl_connect('button_release_event',
-                                                                                 self.window.peak_manipulation.on_cross_release)
-                        self.window.peak_manipulation.highlight_selected_peak()
-                    else:
-                        self.window.peak_manipulation.deselect_all_peaks()
-                else:
-                    self.window.peak_manipulation.deselect_all_peaks()
+                            constraint_names = {
+                                2: 'Position', 3: 'Height', 4: 'FWHM', 5: 'L/G',
+                                6: 'Area', 7: 'Sigma', 8: 'Gamma', 9: 'Skew'
+                            }
+                            constraint_name = constraint_names.get(col)
+                            if constraint_name:
+                                peaks_data[current_peak_key]['Constraints'][constraint_name] = constraint_value
 
-            self.window.show_hide_vlines()
-            self.window.canvas.draw_idle()
+                    # Refresh the grid
+                    self.window.peak_params_grid.ForceRefresh()
 
     def on_click(self, event):
         if event.inaxes:
             x_click = event.xdata
-            if event.button == 1 and event.key == 'shift' and self.window.background_tab_selected:
+            if self.window.zoom_mode:
+                return  # Exit early, don't process vLine clicks during zoom
+
+            # CTRL+DRAG FUNCTIONALITY - Try multiple CTRL key detection methods
+            ctrl_detected = (
+                    event.key == 'ctrl' or
+                    event.key == 'control' or
+                    (event.key and 'ctrl' in str(event.key).lower()) or
+                    (event.key and 'control' in str(event.key).lower())
+            )
+
+            if (event.button == 1 and ctrl_detected and
+                    (self.window.background_tab_selected or
+                     (hasattr(self.window, 'area_tab_selected') and self.window.area_tab_selected))):
+
+                # Check if both vlines exist
+                if self.window.vline1 is not None and self.window.vline2 is not None:
+                    vline1_x = self.window.vline1.get_xdata()[0]
+                    vline2_x = self.window.vline2.get_xdata()[0]
+
+                    # Calculate current gap between vlines (maintain sign/order)
+                    self.vline_gap = vline2_x - vline1_x
+                    self.ctrl_drag_reference_pos = x_click
+                    self.ctrl_drag_active = True
+
+                    center_x = self.window.vline_center.get_xdata()[0]
+                    tolerance = (max(self.window.x_values) - min(self.window.x_values)) * 0.02
+
+                    if abs(x_click - center_x) < tolerance:
+                        vline1_x = self.window.vline1.get_xdata()[0]
+                        vline2_x = self.window.vline2.get_xdata()[0]
+                        self.vline_gap = vline2_x - vline1_x
+                        self.center_drag_reference_pos = x_click
+                        self.center_drag_active = True
+                        self.window.moving_vline = None
+
+                        # Clean up existing handlers
+                        if hasattr(self.window, 'motion_cid'):
+                            self.window.canvas.mpl_disconnect(self.window.motion_cid)
+                            delattr(self.window, 'motion_cid')
+                        if hasattr(self.window, 'release_cid'):
+                            self.window.canvas.mpl_disconnect(self.window.release_cid)
+                            delattr(self.window, 'release_cid')
+
+                        # Set up motion and release handlers
+                        self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event', self.on_motion)
+                        self.window.release_cid = self.window.canvas.mpl_connect('button_release_event', self.on_release)
+
+                        return
+
+
+                    # Explicitly prevent normal vline movement
+                    self.window.moving_vline = None
+
+                    # Clean up any existing handlers first
+                    if hasattr(self.window, 'motion_cid'):
+                        self.window.canvas.mpl_disconnect(self.window.motion_cid)
+                        delattr(self.window, 'motion_cid')
+                    if hasattr(self.window, 'release_cid'):
+                        self.window.canvas.mpl_disconnect(self.window.release_cid)
+                        delattr(self.window, 'release_cid')
+
+                    # Set up motion and release handlers
+                    self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event', self.on_motion)
+                    self.window.release_cid = self.window.canvas.mpl_connect('button_release_event', self.on_release)
+
+                    return  # CRITICAL: Exit here to prevent any other vline logic
+                else:
+                    print("CTRL detected but vlines don't exist")
+
+            elif event.button == 1 and event.key == 'shift' and self.window.background_tab_selected:
+                # Store current vline positions
+                current_vline1_pos = None
+                current_vline2_pos = None
+                if self.window.vline1 is not None:
+                    current_vline1_pos = self.window.vline1.get_xdata()[0]
+                if self.window.vline2 is not None:
+                    current_vline2_pos = self.window.vline2.get_xdata()[0]
+
                 # Clean up any existing handlers first
                 if hasattr(self.window, 'motion_cid'):
                     self.window.canvas.mpl_disconnect(self.window.motion_cid)
@@ -197,36 +230,109 @@ class MouseEventHandler:
                         if vline1_x == low_be_x:
                             calculated_offset = event.ydata - raw_y
                             # Ensure offset cannot be positive
-                            self.window.offset_l = min(calculated_offset, 0)
+                            calculated_offset = min(calculated_offset, 0)
+
+                            # REGION-SPECIFIC UPDATE:
+                            self.window.fitting_window.offset_l_text.SetValue(f'{calculated_offset:.1f}')
+                            if hasattr(self.window.fitting_window,
+                                       'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                                offset_h_value = float(self.window.fitting_window.offset_h_text.GetValue())
+                                self.window.fitting_window.update_active_range_offsets(offset_h_value,
+                                                                                       calculated_offset)
+                            self.window.set_offset_l(calculated_offset)
                             self.window.Data['Core levels'][sheet_name]['Background'][
                                 'Bkg Offset Low'] = self.window.offset_l
-                            self.window.fitting_window.offset_l_text.SetValue(f'{self.window.offset_l:.1f}')
+
                         else:
                             calculated_offset = event.ydata - raw_y
                             # Ensure offset cannot be positive
-                            self.window.offset_h = min(calculated_offset, 0)
+                            calculated_offset = min(calculated_offset, 0)
+
+                            # REGION-SPECIFIC UPDATE:
+                            self.window.fitting_window.offset_h_text.SetValue(f'{calculated_offset:.1f}')
+                            if hasattr(self.window.fitting_window,
+                                       'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                                offset_l_value = float(self.window.fitting_window.offset_l_text.GetValue())
+                                self.window.fitting_window.update_active_range_offsets(calculated_offset,
+                                                                                       offset_l_value)
+                            self.window.set_offset_h(calculated_offset)
                             self.window.Data['Core levels'][sheet_name]['Background'][
                                 'Bkg Offset High'] = self.window.offset_h
-                            self.window.fitting_window.offset_h_text.SetValue(f'{self.window.offset_h:.1f}')
+
                     else:
                         raw_y = self.window.y_values[np.argmin(np.abs(self.window.x_values - vline2_x))]
                         if vline2_x == low_be_x:
                             calculated_offset = event.ydata - raw_y
                             # Ensure offset cannot be positive
-                            self.window.offset_l = min(calculated_offset, 0)
+                            calculated_offset = min(calculated_offset, 0)
+
+                            # REGION-SPECIFIC UPDATE:
+                            self.window.fitting_window.offset_l_text.SetValue(f'{calculated_offset:.1f}')
+                            if hasattr(self.window.fitting_window,
+                                       'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                                offset_h_value = float(self.window.fitting_window.offset_h_text.GetValue())
+                                self.window.fitting_window.update_active_range_offsets(offset_h_value,
+                                                                                       calculated_offset)
+                            self.window.set_offset_l(calculated_offset)
                             self.window.Data['Core levels'][sheet_name]['Background'][
                                 'Bkg Offset Low'] = self.window.offset_l
-                            self.window.fitting_window.offset_l_text.SetValue(f'{self.window.offset_l:.1f}')
+
                         else:
                             calculated_offset = event.ydata - raw_y
                             # Ensure offset cannot be positive
-                            self.window.offset_h = min(calculated_offset, 0)
+                            calculated_offset = min(calculated_offset, 0)
+
+                            # REGION-SPECIFIC UPDATE:
+                            self.window.fitting_window.offset_h_text.SetValue(f'{calculated_offset:.1f}')
+                            if hasattr(self.window.fitting_window,
+                                       'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                                offset_l_value = float(self.window.fitting_window.offset_l_text.GetValue())
+                                self.window.fitting_window.update_active_range_offsets(calculated_offset,
+                                                                                       offset_l_value)
+                            self.window.set_offset_h(calculated_offset)
                             self.window.Data['Core levels'][sheet_name]['Background'][
                                 'Bkg Offset High'] = self.window.offset_h
-                            self.window.fitting_window.offset_h_text.SetValue(f'{self.window.offset_h:.1f}')
+
                     self.window.plot_manager.plot_background(self.window)
+
+                    # Force correct legend update for Multi-Regions Smart background
+                    if hasattr(self.window.plot_manager, 'update_legend'):
+                        self.window.plot_manager.update_legend(self.window)
+
+                    # Restore vlines after plotting
+                    if current_vline1_pos is not None and current_vline2_pos is not None:
+                        wx.CallAfter(self.restore_vlines_after_plot, current_vline1_pos, current_vline2_pos)
                     return
             elif event.button == 1:
+                # Handle center vline dragging (without CTRL key) - CHECK THIS FIRST
+                if ((self.window.background_tab_selected or
+                     (hasattr(self.window, 'area_tab_selected') and self.window.area_tab_selected)) and
+                    hasattr(self.window, 'vline_center') and self.window.vline_center is not None and
+                    self.window.vline1 is not None and self.window.vline2 is not None):
+
+                    center_x = self.window.vline_center.get_xdata()[0]
+                    tolerance = (max(self.window.x_values) - min(self.window.x_values)) * 0.02
+
+                    if abs(x_click - center_x) < tolerance:
+                        vline1_x = self.window.vline1.get_xdata()[0]
+                        vline2_x = self.window.vline2.get_xdata()[0]
+                        self.vline_gap = vline2_x - vline1_x
+                        self.center_drag_reference_pos = x_click
+                        self.center_drag_active = True
+                        self.window.moving_vline = None
+
+                        # Clean up existing handlers
+                        if hasattr(self.window, 'motion_cid'):
+                            self.window.canvas.mpl_disconnect(self.window.motion_cid)
+                            delattr(self.window, 'motion_cid')
+                        if hasattr(self.window, 'release_cid'):
+                            self.window.canvas.mpl_disconnect(self.window.release_cid)
+                            delattr(self.window, 'release_cid')
+
+                        # Set up motion and release handlers
+                        self.window.motion_cid = self.window.canvas.mpl_connect('motion_notify_event', self.on_motion)
+                        self.window.release_cid = self.window.canvas.mpl_connect('button_release_event', self.on_release)
+                        return
                 if event.key == 'shift':
                     if self.window.peak_fitting_tab_selected and self.window.selected_peak_index is not None:
                         row = self.window.selected_peak_index * 2
@@ -243,7 +349,9 @@ class MouseEventHandler:
                                                                                 self.window.peak_manipulation.on_cross_drag)
                         self.window.release_cid = self.window.canvas.mpl_connect('button_release_event',
                                                                                  self.window.peak_manipulation.on_cross_release)
-                elif self.window.background_tab_selected:
+                        # Check if either fitting screen background tab OR area screen is active for vline interaction
+                if (self.window.background_tab_selected or
+                        (hasattr(self.window, 'area_tab_selected') and self.window.area_tab_selected)):
                     # Clean up any existing handlers first
                     if hasattr(self.window, 'motion_cid'):
                         self.window.canvas.mpl_disconnect(self.window.motion_cid)
@@ -316,10 +424,14 @@ class MouseEventHandler:
                                     # Click not near any vline - move the closest one
                                     if dist1 < dist2:
                                         self.window.moving_vline = self.window.vline1
-                                        core_level_data['Background']['Bkg Low'] = float(x_click)
+                                        # Convert display position back to BE for storage
+                                        be_position = self.window.convert_energy_from_display(x_click)
+                                        core_level_data['Background']['Bkg Low'] = float(be_position)
                                     else:
                                         self.window.moving_vline = self.window.vline2
-                                        core_level_data['Background']['Bkg High'] = float(x_click)
+                                        # Convert display position back to BE for storage
+                                        be_position = self.window.convert_energy_from_display(x_click)
+                                        core_level_data['Background']['Bkg High'] = float(be_position)
 
                                     # Update the vline position immediately
                                     self.window.moving_vline.set_xdata([x_click])
@@ -340,12 +452,17 @@ class MouseEventHandler:
                         # Create vlines if they don't exist
                         if self.window.vline1 is None:
                             self.window.vline1 = self.window.ax.axvline(x_click, color='r', linestyle='--')
-                            core_level_data['Background']['Bkg Low'] = float(x_click)
+                            # Convert display position back to BE for storage
+                            be_position = self.window.convert_energy_from_display(x_click)
+                            core_level_data['Background']['Bkg Low'] = float(be_position)
                             self.window.canvas.draw_idle()
                         elif self.window.vline2 is None and abs(
-                                x_click - core_level_data['Background']['Bkg Low']) > self.window.some_threshold:
+                                x_click - self.window.convert_energy_for_display(
+                                    core_level_data['Background']['Bkg Low'])) > self.window.some_threshold:
                             self.window.vline2 = self.window.ax.axvline(x_click, color='r', linestyle='--')
-                            core_level_data['Background']['Bkg High'] = float(x_click)
+                            # Convert display position back to BE for storage
+                            be_position = self.window.convert_energy_from_display(x_click)
+                            core_level_data['Background']['Bkg High'] = float(be_position)
                             core_level_data['Background']['Bkg Low'], core_level_data['Background'][
                                 'Bkg High'] = sorted([
                                 core_level_data['Background']['Bkg Low'],
@@ -355,8 +472,13 @@ class MouseEventHandler:
                         else:
                             # Both vlines exist but we're here somehow - select closest one
                             if self.window.vline2 is not None:
-                                dist_to_low = abs(x_click - core_level_data['Background']['Bkg Low'])
-                                dist_to_high = abs(x_click - core_level_data['Background']['Bkg High'])
+                                # Convert stored BE values to display coordinates for distance calculation
+                                display_low = self.window.convert_energy_for_display(
+                                    core_level_data['Background']['Bkg Low'])
+                                display_high = self.window.convert_energy_for_display(
+                                    core_level_data['Background']['Bkg High'])
+                                dist_to_low = abs(x_click - display_low)
+                                dist_to_high = abs(x_click - display_high)
 
                                 if dist_to_low < dist_to_high:
                                     self.window.moving_vline = self.window.vline1
@@ -470,8 +592,144 @@ class MouseEventHandler:
                 new_sheet = self.window.sheet_combobox.GetString(new_index)
                 on_sheet_selected(self.window, new_sheet)
 
+        self.window.canvas.draw_idle()
+
+        # Refresh vline text labels after mouse wheel zoom
+        self.window.refresh_vline_text_labels()
+
     def on_motion(self, event):
-        if event.button == 1 and event.key == 'shift' and self.window.background_tab_selected:
+
+        # Handle center vline dragging motion
+        if hasattr(self, 'center_drag_active') and self.center_drag_active and event.xdata is not None:
+            # Set the new center directly to the mouse position
+            new_center = event.xdata
+
+            # Calculate new vline positions maintaining the gap
+            new_vline1_x = new_center - self.vline_gap / 2
+            new_vline2_x = new_center + self.vline_gap / 2
+
+            # Update all vline positions
+            self.window.vline1.set_xdata([new_vline1_x, new_vline1_x])
+            self.window.vline2.set_xdata([new_vline2_x, new_vline2_x])
+            self.window.vline_center.set_xdata([new_center, new_center])
+
+            # Update text labels and area detection
+            if hasattr(self.window, 'background_window') and self.window.background_window:
+                # Call AreaFit_Screen's update method which includes auto-detection
+                if hasattr(self.window.background_window, 'update_vline_text_labels'):
+                    self.window.background_window.update_vline_text_labels()
+            elif hasattr(self.window, 'update_vline_text_labels'):
+                # Fallback to main window method
+                self.window.update_vline_text_labels()
+
+            # Update center text
+            if hasattr(self.window, 'vline_center_text') and self.window.vline_center_text:
+                y_pos = self.window.vline_center_text.get_position()[1]
+                self.window.vline_center_text.set_position((new_center, y_pos))
+                self.window.vline_center_text.set_text(f'{new_center:.2f}')
+
+            # Update range controls
+            if hasattr(self.window, 'background_window') and self.window.background_window:
+                min_pos = min(new_vline1_x, new_vline2_x)
+                max_pos = max(new_vline1_x, new_vline2_x)
+                try:
+                    self.window.background_window.updating_range_controls = True
+                    self.window.background_window.min_range_text.SetValue(f"{min_pos:.2f}")
+                    self.window.background_window.max_range_text.SetValue(f"{max_pos:.2f}")
+                    self.window.background_window.updating_range_controls = False
+                except:
+                    pass
+
+            self.window.canvas.draw_idle()
+            return
+
+        # CTRL+DRAG MOTION HANDLING - MUST BE FIRST
+        elif self.ctrl_drag_active and event.inaxes:
+            if self.window.vline1 is not None and self.window.vline2 is not None:
+
+                # Calculate mouse movement delta
+                mouse_delta = event.xdata - self.ctrl_drag_reference_pos
+
+                # Get current vline1 position as reference
+                current_vline1_x = self.window.vline1.get_xdata()[0]
+
+                # Calculate new positions
+                new_vline1_x = current_vline1_x + mouse_delta
+                new_vline2_x = new_vline1_x + self.vline_gap  # Maintain exact gap
+
+                # Update both vline positions simultaneously
+                self.window.vline1.set_xdata([new_vline1_x, new_vline1_x])
+                self.window.vline2.set_xdata([new_vline2_x, new_vline2_x])
+
+                # Update range controls
+                if hasattr(self.window, 'fitting_window') and self.window.fitting_window:
+                    min_pos = min(new_vline1_x, new_vline2_x)
+                    max_pos = max(new_vline1_x, new_vline2_x)
+
+                    try:
+                        self.window.fitting_window.updating_range_controls = True
+                        self.window.fitting_window.min_range_text.SetValue(f"{min_pos:.2f}")
+                        self.window.fitting_window.max_range_text.SetValue(f"{max_pos:.2f}")
+                        self.window.fitting_window.updating_range_controls = False
+                    except:
+                        pass
+
+                # UPDATE VLINE TEXT LABELS - Try multiple methods
+                try:
+                    # Method 1: Direct update if method exists
+                    if hasattr(self.window, 'update_vline_text_labels'):
+                        self.window.update_vline_text_labels()
+
+                    # Method 2: Refresh if method exists
+                    if hasattr(self.window, 'refresh_vline_text_labels'):
+                        self.window.refresh_vline_text_labels()
+
+                    # Method 3: Update text positions directly if text objects exist
+                    if hasattr(self.window, 'vline1_text') and self.window.vline1_text:
+                        y_pos = self.window.vline1_text.get_position()[1]
+                        self.window.vline1_text.set_position((new_vline1_x, y_pos))
+
+                    if hasattr(self.window, 'vline2_text') and self.window.vline2_text:
+                        y_pos = self.window.vline2_text.get_position()[1]
+                        self.window.vline2_text.set_position((new_vline2_x, y_pos))
+
+                    # Method 4: Update text content if text objects exist
+                    if hasattr(self.window, 'vline1_text') and self.window.vline1_text:
+                        self.window.vline1_text.set_text(f"{new_vline1_x:.1f}")
+
+                    if hasattr(self.window, 'vline2_text') and self.window.vline2_text:
+                        self.window.vline2_text.set_text(f"{new_vline2_x:.1f}")
+
+                    # UPDATE AVERAGING INDICATOR LINES
+                    if hasattr(self.window, 'add_averaging_indicator_lines'):
+                        self.window.add_averaging_indicator_lines()
+
+                except Exception as e:
+                    print(f"Error updating vline text labels: {e}")
+
+                # Update auto-detection for area fitting
+                if hasattr(self.window, 'area_tab_selected') and self.window.area_tab_selected:
+                    if hasattr(self.window.fitting_window, 'auto_detect_area_name'):
+                        self.window.fitting_window.auto_detect_area_name(new_vline1_x, new_vline2_x)
+                    if hasattr(self.window.fitting_window, 'update_core_level_list_if_open'):
+                        self.window.fitting_window.update_core_level_list_if_open()
+
+                # Update reference position for smooth dragging
+                self.ctrl_drag_reference_pos = event.xdata
+
+                # Redraw canvas
+                self.window.canvas.draw_idle()
+
+                return  # CRITICAL: Exit here to prevent normal motion handling
+        elif event.button == 1 and event.key == 'shift' and self.window.background_tab_selected:
+            # Store current vline positions
+            current_vline1_pos = None
+            current_vline2_pos = None
+            if self.window.vline1 is not None:
+                current_vline1_pos = self.window.vline1.get_xdata()[0]
+            if self.window.vline2 is not None:
+                current_vline2_pos = self.window.vline2.get_xdata()[0]
+
             x_click = event.xdata
             sheet_name = self.window.sheet_combobox.GetValue()
             if self.window.vline1 is not None and self.window.vline2 is not None:
@@ -489,35 +747,71 @@ class MouseEventHandler:
                     if vline1_x == low_be_x:
                         calculated_offset = event.ydata - raw_y
                         # Ensure offset cannot be positive
-                        self.window.offset_l = min(calculated_offset, 0)
-                        self.window.Data['Core levels'][sheet_name]['Background'][
-                            'Bkg Offset Low'] = self.window.offset_l
-                        self.window.fitting_window.offset_l_text.SetValue(f'{self.window.offset_l:.1f}')
+                        calculated_offset = min(calculated_offset, 0)
+
+                        # REGION-SPECIFIC UPDATE:
+                        self.window.fitting_window.offset_l_text.SetValue(f'{calculated_offset:.1f}')
+                        if hasattr(self.window.fitting_window,
+                                   'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                            offset_h_value = float(self.window.fitting_window.offset_h_text.GetValue())
+                            self.window.fitting_window.update_active_range_offsets(offset_h_value, calculated_offset)
+                        self.window.set_offset_l(calculated_offset)
+
                     else:
                         calculated_offset = event.ydata - raw_y
                         # Ensure offset cannot be positive
-                        self.window.offset_h = min(calculated_offset, 0)
-                        self.window.Data['Core levels'][sheet_name]['Background'][
-                            'Bkg Offset High'] = self.window.offset_h
-                        self.window.fitting_window.offset_h_text.SetValue(f'{self.window.offset_h:.1f}')
+                        calculated_offset = min(calculated_offset, 0)
+
+                        # REGION-SPECIFIC UPDATE:
+                        self.window.fitting_window.offset_h_text.SetValue(f'{calculated_offset:.1f}')
+                        if hasattr(self.window.fitting_window,
+                                   'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                            offset_l_value = float(self.window.fitting_window.offset_l_text.GetValue())
+                            self.window.fitting_window.update_active_range_offsets(calculated_offset, offset_l_value)
+                        self.window.set_offset_h(calculated_offset)
+
                 else:
                     raw_y = self.window.y_values[np.argmin(np.abs(self.window.x_values - vline2_x))]
                     if vline2_x == low_be_x:
                         calculated_offset = event.ydata - raw_y
                         # Ensure offset cannot be positive
-                        self.window.offset_l = min(calculated_offset, 0)
-                        self.window.Data['Core levels'][sheet_name]['Background'][
-                            'Bkg Offset Low'] = self.window.offset_l
-                        self.window.fitting_window.offset_l_text.SetValue(f'{self.window.offset_l:.1f}')
+                        calculated_offset = min(calculated_offset, 0)
+
+                        # REGION-SPECIFIC UPDATE:
+                        self.window.fitting_window.offset_l_text.SetValue(f'{calculated_offset:.1f}')
+                        if hasattr(self.window.fitting_window,
+                                   'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                            offset_h_value = float(self.window.fitting_window.offset_h_text.GetValue())
+                            self.window.fitting_window.update_active_range_offsets(offset_h_value, calculated_offset)
+                        self.window.set_offset_l(calculated_offset)
+
                     else:
                         calculated_offset = event.ydata - raw_y
                         # Ensure offset cannot be positive
-                        self.window.offset_h = min(calculated_offset, 0)
-                        self.window.Data['Core levels'][sheet_name]['Background'][
-                            'Bkg Offset High'] = self.window.offset_h
-                        self.window.fitting_window.offset_h_text.SetValue(f'{self.window.offset_h:.1f}')
+                        calculated_offset = min(calculated_offset, 0)
+
+                        # REGION-SPECIFIC UPDATE:
+                        self.window.fitting_window.offset_h_text.SetValue(f'{calculated_offset:.1f}')
+                        if hasattr(self.window.fitting_window,
+                                   'active_range_index') and self.window.fitting_window.active_range_index >= 0:
+                            offset_l_value = float(self.window.fitting_window.offset_l_text.GetValue())
+                            self.window.fitting_window.update_active_range_offsets(calculated_offset, offset_l_value)
+                        self.window.set_offset_h(calculated_offset)
+
+                # Store old 'Bkg Offset' values in window.data
+                self.window.Data['Core levels'][sheet_name]['Background']['Bkg Offset Low'] = self.window.offset_l
+                self.window.Data['Core levels'][sheet_name]['Background']['Bkg Offset High'] = self.window.offset_h
 
                 self.window.plot_manager.plot_background(self.window)
+
+                # Force correct legend update for Multi-Regions Smart background
+                if hasattr(self.window.plot_manager, 'update_legend'):
+                    self.window.plot_manager.update_legend(self.window)
+
+                # Restore vlines after plotting
+                if current_vline1_pos is not None and current_vline2_pos is not None:
+                    wx.CallAfter(self.restore_vlines_after_plot, current_vline1_pos, current_vline2_pos)
+
         elif event.inaxes and self.window.moving_vline is not None:
             x_click = event.xdata
             self.window.moving_vline.set_xdata([x_click])
@@ -527,15 +821,36 @@ class MouseEventHandler:
                 core_level_data = self.window.Data['Core levels'][sheet_name]
 
                 if self.window.moving_vline in [self.window.vline1, self.window.vline2]:
+                    # Convert display position back to BE for storage
+                    be_position = self.window.convert_energy_from_display(x_click)
                     if self.window.moving_vline == self.window.vline1:
-                        core_level_data['Background']['Bkg Low'] = float(x_click)
+                        core_level_data['Background']['Bkg Low'] = float(be_position)
                     else:
-                        core_level_data['Background']['Bkg High'] = float(x_click)
+                        core_level_data['Background']['Bkg High'] = float(be_position)
 
                     bkg_low = core_level_data['Background']['Bkg Low']
                     bkg_high = core_level_data['Background']['Bkg High']
                     core_level_data['Background']['Bkg Low'] = min(bkg_low, bkg_high)
                     core_level_data['Background']['Bkg High'] = max(bkg_low, bkg_high)
+
+                    # Update text labels when vlines are moved
+                    self.window.update_vline_text_labels()
+
+                    # UPDATE AVERAGING INDICATOR LINES
+                    if hasattr(self.window, 'add_averaging_indicator_lines'):
+                        self.window.add_averaging_indicator_lines()
+
+                    # Update fitting screen range controls
+                    self.window.update_fitting_screen_range_controls()
+
+                    # Update area screen range controls when vlines move
+                    if (hasattr(self.window, 'background_window') and self.window.background_window is not None and
+                            hasattr(self.window.background_window, 'update_vline_text_labels') and
+                            hasattr(self.window.background_window, 'update_range_controls_from_data')):
+                        if self.window.moving_vline in [self.window.vline1, self.window.vline2]:
+                            self.window.background_window.update_vline_text_labels()
+                            self.window.background_window.update_range_controls_from_data()
+                            self.window.update_area_screen_range_controls()
 
                 elif self.window.moving_vline in [self.window.vline3, self.window.vline4]:
                     if self.window.moving_vline == self.window.vline3:
@@ -546,7 +861,563 @@ class MouseEventHandler:
                     self.window.noise_min_energy, self.window.noise_max_energy = sorted(
                         [self.window.noise_min_energy, self.window.noise_max_energy])
 
+            # Update VBM controls during dragging
+            self.update_vbm_controls_from_vlines()
+
             self.window.canvas.draw_idle()
+
+        # Update vline text labels when moving vlines
+        if self.window.moving_vline in [self.window.vline1, self.window.vline2]:
+            self.window.update_vline_text_labels()
+
+        # UPDATE AVERAGING INDICATOR LINES
+        if hasattr(self.window, 'add_averaging_indicator_lines'):
+            self.window.add_averaging_indicator_lines()
+
+    def redraw_all_regions_background_OLD(self):
+        """Delete whole background and redraw from region 1, 2, 3... in sequence"""
+        if not hasattr(self.window, 'fitting_window') or self.window.fitting_window is None:
+            return
+
+        sheet_name = self.window.sheet_combobox.GetValue()
+        if sheet_name not in self.window.Data['Core levels']:
+            return
+
+        # Get all recorded ranges from window.data
+        ranges = self.window.fitting_window.get_recorded_ranges_from_data()
+        if not ranges:
+            return
+
+        # Store current vline positions before they get destroyed
+        current_vline1_pos = None
+        current_vline2_pos = None
+        if self.window.vline1 is not None:
+            current_vline1_pos = self.window.vline1.get_xdata()[0]
+        if self.window.vline2 is not None:
+            current_vline2_pos = self.window.vline2.get_xdata()[0]
+
+        # Clear existing background
+        x_values = np.array(self.window.Data['Core levels'][sheet_name]['B.E.'], dtype=float)
+        y_values = np.array(self.window.Data['Core levels'][sheet_name]['Raw Data'], dtype=float)
+
+        # Initialize background to raw data
+        self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = y_values.tolist()
+        current_background = np.array(y_values)
+
+        # Get active region index
+        active_region_index = getattr(self.window.fitting_window, 'active_range_index', -1)
+
+        # Apply each region in sequence: region 1, then 2, then 3, etc.
+        for i, (offset_h, offset_l, min_range, max_range) in enumerate(ranges):
+            # # Calculate background for this specific region using window.data offset values
+            # from libraries.Peak_Functions import BackgroundCalculations
+            # current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+            #     x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l
+            # )
+
+            # Calculate background for this specific region based on selected method
+            from libraries.Peak_Functions import BackgroundCalculations
+            method = self.window.background_method
+
+            # SPECIAL HANDLING FOR TOUGAARD METHODS - they cannot be applied region-by-region
+            if method in ["U4-Tougaard", "U2-Tougaard", "2x U4-Tougaard", "3x U4-Tougaard"]:
+                # Skip region-by-region processing for Tougaard methods
+                # They will be handled by the final step outside the loop
+                pass
+            elif method == "Multi-Regions Smart":
+                current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+                    x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+            elif method == "Shirley":
+                current_background = BackgroundCalculations.calculate_adaptive_shirley_background(
+                    x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+            elif method == "Linear":
+                current_background = BackgroundCalculations.calculate_adaptive_linear_background(
+                    x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+            elif method == "Smart":
+                current_background = BackgroundCalculations.calculate_adaptive_single_smart_background(
+                    x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+            else:
+                # Fallback to smart for unknown methods
+                current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+                    x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+
+            # Handle Tougaard methods AFTER processing all regions
+            method = self.window.background_method
+            if method in ["U4-Tougaard", "U2-Tougaard", "2x U4-Tougaard", "3x U4-Tougaard"]:
+                print(f"Applying {method} to all regions...")
+
+                # Store original values
+                temp_bg_min = self.window.bg_min_energy
+                temp_bg_max = self.window.bg_max_energy
+
+                # Set full range for Tougaard calculation
+                self.window.bg_min_energy = float(np.min(x_values))
+                self.window.bg_max_energy = float(np.max(x_values))
+
+                try:
+                    # Calculate Tougaard background for entire spectrum or per-region
+                    if method == "U4-Tougaard":
+                        full_tougaard_bg = BackgroundCalculations.calculate_tougaard_background(
+                            x_values, y_values, sheet_name, self.window)
+                    elif method == "U2-Tougaard":
+                        # For U2-Tougaard: Calculate backgrounds region by region using CURRENT background state
+                        current_background = np.array(y_values)  # Start with raw data
+
+                        for i, (offset_h, offset_l, min_range, max_range) in enumerate(ranges):
+                            print(f"Calculating U2-Tougaard for region {i + 1}: {min_range:.2f} - {max_range:.2f} eV")
+
+                            # Use the current cumulative background state (includes previous regions)
+                            # This is critical - each region builds on the previous ones
+                            region_vline_range = (min_range, max_range)
+
+                            # Pass the current background state, not raw y_values
+                            region_tougaard_bg = BackgroundCalculations.calculate_u2_tougaard_background(
+                                x_values, current_background, sheet_name, self.window, region_vline_range)
+
+                            # Apply only to this region
+                            region_mask = (x_values >= min_range) & (x_values <= max_range)
+                            current_background[region_mask] = region_tougaard_bg[region_mask]
+
+                            # Get the fitted parameters for logging
+                            fitted_b = self.window.Data['Core levels'][sheet_name]['Background'].get('Fitted_B', 0)
+                            fitted_c = self.window.Data['Core levels'][sheet_name]['Background'].get('Fitted_C', 1643)
+                            print(f"Region {i + 1} U2-Tougaard: B={fitted_b:.2f}, C={fitted_c:.2f} applied to {min_range:.2f}-{max_range:.2f}")
+
+                        # Don't apply again outside the loop
+                        full_tougaard_bg = current_background
+                    else:
+                        full_tougaard_bg = current_background  # fallback
+
+                    # Apply Tougaard background ONLY in the defined regions (skip for U2 since already done)
+                    if method != "U2-Tougaard":
+                        current_background = np.array(y_values)  # Start fresh with raw data
+                        for offset_h, offset_l, min_range, max_range in ranges:
+                            region_mask = (x_values >= min_range) & (x_values <= max_range)
+                            current_background[region_mask] = full_tougaard_bg[region_mask]
+
+                finally:
+                    # Restore original values
+                    self.window.bg_min_energy = temp_bg_min
+                    self.window.bg_max_energy = temp_bg_max
+        # Update the final background
+        self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = current_background.tolist()
+        self.window.background = current_background
+
+        # CRITICAL: Update window offset values to match active region offsets
+        # This ensures plot_background() uses correct offsets for the active region
+        if active_region_index >= 0 and active_region_index < len(ranges):
+            active_offset_h, active_offset_l, _, _ = ranges[active_region_index]
+            self.window.offset_h = active_offset_h
+            self.window.offset_l = active_offset_l
+            # print(f"Updated window offsets to active region values: {active_offset_h:.1f}, {active_offset_l:.1f}")
+
+        # Redraw the plot
+        self.window.plot_manager.plot_background(self.window)
+
+        # Force correct legend update for Multi-Regions Smart background
+        if hasattr(self.window.plot_manager, 'update_legend'):
+            self.window.plot_manager.update_legend(self.window)
+
+        # RESTORE vLines after plotting (they get destroyed by clear_and_replot)
+        if current_vline1_pos is not None and current_vline2_pos is not None:
+            # Force vline recreation at stored positions
+            wx.CallAfter(self.restore_vlines_after_plot, current_vline1_pos, current_vline2_pos)
+
+    def redraw_all_regions_background_OLD2(self):
+        """Delete whole background and redraw from region 1, 2, 3... in sequence"""
+
+        from libraries.Peak_Functions import BackgroundCalculations
+        if not hasattr(self.window, 'fitting_window') or self.window.fitting_window is None:
+            return
+
+        sheet_name = self.window.sheet_combobox.GetValue()
+        if sheet_name not in self.window.Data['Core levels']:
+            return
+
+        # Get all recorded ranges from window.data
+        ranges = self.window.fitting_window.get_recorded_ranges_from_data()
+        if not ranges:
+            return
+
+        # Store current vline positions before they get destroyed
+        current_vline1_pos = None
+        current_vline2_pos = None
+        if self.window.vline1 is not None:
+            current_vline1_pos = self.window.vline1.get_xdata()[0]
+        if self.window.vline2 is not None:
+            current_vline2_pos = self.window.vline2.get_xdata()[0]
+
+        # Clear existing background
+        x_values = np.array(self.window.Data['Core levels'][sheet_name]['B.E.'], dtype=float)
+        y_values = np.array(self.window.Data['Core levels'][sheet_name]['Raw Data'], dtype=float)
+
+        # Initialize background to raw data
+        self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = y_values.tolist()
+        current_background = np.array(y_values)
+
+        # Get active region index
+        active_region_index = getattr(self.window.fitting_window, 'active_range_index', -1)
+
+        method = self.window.background_method
+
+        # HANDLE TOUGAARD METHODS SEPARATELY (OUTSIDE THE MAIN LOOP)
+        if method in ["U4-Tougaard", "U2-Tougaard", "2x U4-Tougaard", "3x U4-Tougaard"]:
+            print(f"Applying {method} to all regions...")
+
+            # Store original values
+            temp_bg_min = self.window.bg_min_energy
+            temp_bg_max = self.window.bg_max_energy
+
+            # Set full range for Tougaard calculation
+            self.window.bg_min_energy = float(np.min(x_values))
+            self.window.bg_max_energy = float(np.max(x_values))
+
+            try:
+                if method == "U4-Tougaard":
+                    full_tougaard_bg = BackgroundCalculations.calculate_tougaard_background(
+                        x_values, y_values, sheet_name, self.window)
+                    # Apply to all regions
+                    for offset_h, offset_l, min_range, max_range in ranges:
+                        region_mask = (x_values >= min_range) & (x_values <= max_range)
+                        current_background[region_mask] = full_tougaard_bg[region_mask]
+
+                elif method == "U2-Tougaard":
+                    # For U2-Tougaard: Calculate each region independently
+                    for i, (offset_h, offset_l, min_range, max_range) in enumerate(ranges):
+                        print(f"Calculating U2-Tougaard for region {i + 1}: {min_range:.2f} - {max_range:.2f} eV")
+
+                        region_vline_range = (min_range, max_range)
+                        region_tougaard_bg = BackgroundCalculations.calculate_u2_tougaard_background(
+                            x_values, current_background, sheet_name, self.window, region_vline_range)
+
+                        # Apply only to this region
+                        region_mask = (x_values >= min_range) & (x_values <= max_range)
+                        current_background[region_mask] = region_tougaard_bg[region_mask]
+
+                        # Get the fitted parameters for logging
+                        fitted_b = self.window.Data['Core levels'][sheet_name]['Background'].get('Fitted_B', 0)
+                        fitted_c = self.window.Data['Core levels'][sheet_name]['Background'].get('Fitted_C', 1643)
+                        print(f"Region {i + 1} U2-Tougaard: B={fitted_b:.2f}, C={fitted_c:.2f} applied to {min_range:.2f}-{max_range:.2f}")
+            finally:
+                # Restore original values
+                self.window.bg_min_energy = temp_bg_min
+                self.window.bg_max_energy = temp_bg_max
+
+        else:
+            # HANDLE NON-TOUGAARD METHODS WITH MAIN LOOP
+            for i, (offset_h, offset_l, min_range, max_range) in enumerate(ranges):
+
+
+                if method == "Multi-Regions Smart":
+                    current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                elif method == "Shirley":
+                    current_background = BackgroundCalculations.calculate_adaptive_shirley_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                elif method == "Linear":
+                    current_background = BackgroundCalculations.calculate_adaptive_linear_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                elif method == "Smart":
+                    current_background = BackgroundCalculations.calculate_adaptive_single_smart_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                else:
+                    # Fallback to smart for unknown methods
+                    current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+
+        # Update the final background
+        self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = current_background.tolist()
+        self.window.background = current_background
+
+        # CRITICAL: Update window offset values to match active region offsets
+        if active_region_index >= 0 and active_region_index < len(ranges):
+            active_offset_h, active_offset_l, _, _ = ranges[active_region_index]
+            self.window.offset_h = active_offset_h
+            self.window.offset_l = active_offset_l
+
+        # Redraw the plot
+        self.window.plot_manager.plot_background(self.window)
+
+        # Force correct legend update
+        if hasattr(self.window.plot_manager, 'update_legend'):
+            self.window.plot_manager.update_legend(self.window)
+
+        # RESTORE vLines after plotting
+        if current_vline1_pos is not None and current_vline2_pos is not None:
+            wx.CallAfter(self.restore_vlines_after_plot, current_vline1_pos, current_vline2_pos)
+
+    def redraw_all_regions_background(self):
+        """Delete whole background and redraw from region 1, 2, 3... in sequence"""
+
+        from libraries.Peak_Functions import BackgroundCalculations
+        if not hasattr(self.window, 'fitting_window') or self.window.fitting_window is None:
+            return
+
+        sheet_name = self.window.sheet_combobox.GetValue()
+        if sheet_name not in self.window.Data['Core levels']:
+            return
+
+        # Get all recorded ranges from window.data
+        ranges = self.window.fitting_window.get_recorded_ranges_from_data()
+        if not ranges:
+            return
+
+        # Store current vline positions before they get destroyed
+        current_vline1_pos = None
+        current_vline2_pos = None
+        if self.window.vline1 is not None:
+            current_vline1_pos = self.window.vline1.get_xdata()[0]
+        if self.window.vline2 is not None:
+            current_vline2_pos = self.window.vline2.get_xdata()[0]
+
+        # Clear existing background
+        x_values = np.array(self.window.Data['Core levels'][sheet_name]['B.E.'], dtype=float)
+        y_values = np.array(self.window.Data['Core levels'][sheet_name]['Raw Data'], dtype=float)
+
+        # Initialize background to raw data
+        self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = y_values.tolist()
+        current_background = np.array(y_values)
+
+        # Get active region index
+        active_region_index = getattr(self.window.fitting_window, 'active_range_index', -1)
+
+        method = self.window.background_method
+
+        # HANDLE TOUGAARD METHODS SEPARATELY (OUTSIDE THE MAIN LOOP)
+        if method in ["U4-Tougaard", "U2-Tougaard", "2x U4-Tougaard", "3x U4-Tougaard"]:
+            print(f"Applying {method} to all regions...")
+
+            # Store original values
+            temp_bg_min = self.window.bg_min_energy
+            temp_bg_max = self.window.bg_max_energy
+
+            # Set full range for Tougaard calculation
+            self.window.bg_min_energy = float(np.min(x_values))
+            self.window.bg_max_energy = float(np.max(x_values))
+
+            try:
+                if method == "U4-Tougaard":
+                    full_tougaard_bg = BackgroundCalculations.calculate_tougaard_background(
+                        x_values, y_values, sheet_name, self.window)
+                    # Apply to all regions
+                    for offset_h, offset_l, min_range, max_range in ranges:
+                        region_mask = (x_values >= min_range) & (x_values <= max_range)
+                        current_background[region_mask] = full_tougaard_bg[region_mask]
+
+                elif method == "U2-Tougaard":
+                    # For U2-Tougaard: Calculate each region independently using ONLY region data
+                    for i, (offset_h, offset_l, min_range, max_range) in enumerate(ranges):
+                        print(f"Calculating U2-Tougaard for region {i + 1}: {min_range:.2f} - {max_range:.2f} eV")
+
+                        # CRITICAL: Extract only the data within this region's range
+                        region_mask = (x_values >= min_range) & (x_values <= max_range)
+                        x_region = x_values[region_mask]
+                        y_region = y_values[region_mask]
+
+                        if len(x_region) < 3:  # Need minimum points for calculation
+                            print(f"Warning: Region {i + 1} has insufficient data points, skipping")
+                            continue
+
+                        region_vline_range = (min_range, max_range)
+
+                        # Calculate U2-Tougaard using ONLY the region data
+                        region_tougaard_bg = BackgroundCalculations.calculate_u2_tougaard_background(
+                            x_region, y_region, sheet_name, self.window, region_vline_range)
+
+                        # Apply the calculated background to this region in the full spectrum
+                        current_background[region_mask] = region_tougaard_bg
+
+                        # Get the fitted parameters for logging
+                        fitted_b = self.window.Data['Core levels'][sheet_name]['Background'].get('Fitted_B', 0)
+                        fitted_c = self.window.Data['Core levels'][sheet_name]['Background'].get('Fitted_C', 1643)
+                        print(f"Region {i + 1} U2-Tougaard: B={fitted_b:.2f}, C={fitted_c:.2f} applied to {min_range:.2f}-{max_range:.2f}")
+                        print(f"  Using {len(x_region)} data points from region")
+            finally:
+                # Restore original values
+                self.window.bg_min_energy = temp_bg_min
+                self.window.bg_max_energy = temp_bg_max
+
+        else:
+            # HANDLE NON-TOUGAARD METHODS WITH MAIN LOOP
+            for i, (offset_h, offset_l, min_range, max_range) in enumerate(ranges):
+                if method == "Multi-Regions Smart":
+                    current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                elif method == "Shirley":
+                    current_background = BackgroundCalculations.calculate_adaptive_shirley_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                elif method == "Linear":
+                    current_background = BackgroundCalculations.calculate_adaptive_linear_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                elif method == "Smart":
+                    current_background = BackgroundCalculations.calculate_adaptive_single_smart_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+                else:
+                    # Fallback to smart for unknown methods
+                    current_background = BackgroundCalculations.calculate_adaptive_smart_background(
+                        x_values, y_values, (min_range, max_range), current_background, offset_h, offset_l)
+
+        # Update the final background
+        self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'] = current_background.tolist()
+        self.window.background = current_background
+
+        # CRITICAL: Update window offset values to match active region offsets
+        if active_region_index >= 0 and active_region_index < len(ranges):
+            active_offset_h, active_offset_l, _, _ = ranges[active_region_index]
+            self.window.offset_h = active_offset_h
+            self.window.offset_l = active_offset_l
+
+        # Only redraw plot for non-Tougaard methods (Tougaard background is already calculated above)
+        if method not in ["U4-Tougaard", "U2-Tougaard", "2x U4-Tougaard", "3x U4-Tougaard"]:
+            self.window.plot_manager.plot_background(self.window)
+        else:
+            print(f"Skipped plot_background call for {method} - background already calculated")
+            # For Tougaard: plot data and background, then replot peaks if they exist
+            self.window.plot_manager.plot_data(self.window)
+
+            # Plot the background manually (same as plot_background method)
+            x_values = np.array(self.window.Data['Core levels'][sheet_name]['B.E.'])
+            self.window.ax.plot(x_values, current_background,
+                                color=self.window.plot_manager.background_color,
+                                linestyle=self.window.plot_manager.background_linestyle,
+                                alpha=self.window.plot_manager.background_alpha,
+                                linewidth=self.window.plot_manager.background_thickness,
+                                label='Background (U2-Tougaard)' if method == "U2-Tougaard" else f'Background ({method})')
+
+            # Replot peaks if they exist (same as regular plot_background)
+            if self.window.peak_params_grid.GetNumberRows() > 0:
+                self.window.clear_and_replot()
+
+        # Force correct legend update
+        if hasattr(self.window.plot_manager, 'update_legend'):
+            self.window.plot_manager.update_legend(self.window)
+
+        # RESTORE vLines after plotting
+        if current_vline1_pos is not None and current_vline2_pos is not None:
+            wx.CallAfter(self.restore_vlines_after_plot, current_vline1_pos, current_vline2_pos)
+
+    def restore_vlines_after_plot(self, vline1_pos, vline2_pos):
+        """Restore vlines at specified positions after plotting"""
+        try:
+            # FIRST: Remove/destroy any existing vlines
+            if self.window.vline1 is not None:
+                try:
+                    self.window.vline1.remove()
+                except:
+                    pass
+                self.window.vline1 = None
+
+            if self.window.vline2 is not None:
+                try:
+                    self.window.vline2.remove()
+                except:
+                    pass
+                self.window.vline2 = None
+
+            # Remove any existing text labels
+            if hasattr(self.window, 'vline1_text') and self.window.vline1_text is not None:
+                try:
+                    self.window.vline1_text.remove()
+                except:
+                    pass
+                self.window.vline1_text = None
+
+            if hasattr(self.window, 'vline2_text') and self.window.vline2_text is not None:
+                try:
+                    self.window.vline2_text.remove()
+                except:
+                    pass
+                self.window.vline2_text = None
+            # Clean up center vline
+            if hasattr(self.window, 'vline_center') and self.window.vline_center is not None:
+                try:
+                    self.window.vline_center.remove()
+                except:
+                    pass
+                self.vline_center = None
+            if hasattr(self.window, 'vline_center_text') and self.window.vline_center_text is not None:
+                try:
+                    self.window.vline_center_text.remove()
+                except:
+                    pass
+                self.window.vline_center_text = None
+
+            # THEN: Create new vlines at the specified positions
+            self.window.vline1 = self.window.ax.axvline(x=vline1_pos, color='red', linestyle='--', alpha=0.7)
+            self.window.vline2 = self.window.ax.axvline(x=vline2_pos, color='red', linestyle='--', alpha=0.7)
+
+            # Create new text labels
+            if hasattr(self.window, 'add_vline_text_labels'):
+                self.window.add_vline_text_labels()
+            elif hasattr(self.window, 'update_vline_text_labels'):
+                self.window.update_vline_text_labels()
+
+            # UPDATE AVERAGING INDICATOR LINES
+            if hasattr(self.window, 'add_averaging_indicator_lines'):
+                self.window.add_averaging_indicator_lines()
+
+            # Make sure they're visible
+            self.window.show_hide_vlines()
+
+            # Force canvas redraw
+            self.window.canvas.draw_idle()
+
+            # print(f"Restored vlines at positions: {vline1_pos:.2f}, {vline2_pos:.2f}")
+
+        except Exception as e:
+            print(f"Error restoring vlines: {e}")
+
+    def update_active_region_positions(self):
+        """Record new vLine positions in the active region's min/max range and window.data"""
+        if (not hasattr(self.window, 'fitting_window') or
+                not hasattr(self.window.fitting_window, 'active_range_index') or
+                self.window.fitting_window.active_range_index < 0):
+            # Still update VBM controls even if no fitting window active
+            self.update_vbm_controls_from_vlines()
+            return
+
+        # Get current vline positions
+        if self.window.vline1 is None or self.window.vline2 is None:
+            return
+
+        vline1_x = self.window.vline1.get_xdata()[0]
+        vline2_x = self.window.vline2.get_xdata()[0]
+
+        # Round to 2 decimal places before storing
+        min_pos = round(min(vline1_x, vline2_x), 2)
+        max_pos = round(max(vline1_x, vline2_x), 2)
+
+        # Get current offset values from UI controls instead of stored values
+        try:
+            current_offset_h = float(self.window.fitting_window.offset_h_text.GetValue())
+            current_offset_l = float(self.window.fitting_window.offset_l_text.GetValue())
+        except (ValueError, AttributeError):
+            current_offset_h = 0.0
+            current_offset_l = 0.0
+
+        # Update the active region's positions
+        ranges = self.window.fitting_window.get_recorded_ranges_from_data()
+        active_idx = self.window.fitting_window.active_range_index
+
+        if active_idx < len(ranges):
+            # Use current UI offset values instead of stored ones
+            old_offset_h, old_offset_l, old_min, old_max = ranges[active_idx]
+            ranges[active_idx] = (current_offset_h, current_offset_l, min_pos, max_pos)
+
+            # Save back to window.data
+            sheet_name = self.window.sheet_combobox.GetValue()
+            if 'Background' not in self.window.Data['Core levels'][sheet_name]:
+                self.window.Data['Core levels'][sheet_name]['Background'] = {}
+            self.window.Data['Core levels'][sheet_name]['Background']['Recorded_Ranges'] = ranges
+
+            # Update the UI range controls
+            self.window.fitting_window.updating_range_controls = True
+            self.window.fitting_window.min_range_text.SetValue(f"{min_pos:.2f}")
+            self.window.fitting_window.max_range_text.SetValue(f"{max_pos:.2f}")
+            self.window.fitting_window.updating_range_controls = False
+
+        # Update VBM controls if VBM window is open
+        self.update_vbm_controls_from_vlines()
 
     def cleanup_vline_handlers(self):
         """Clean up any existing vline event handlers"""
@@ -561,13 +1432,89 @@ class MouseEventHandler:
         self.window.moving_vline = None
 
     def on_release(self, event):
-        if self.window.moving_vline is not None:
-            # if hasattr(self.window, 'motion_notify_id'):
-            #     self.window.canvas.mpl_disconnect(self.window.motion_notify_id)
-            #     delattr(self.window, 'motion_notify_id')
-            # if hasattr(self.window, 'button_release_id'):
-            #     self.window.canvas.mpl_disconnect(self.window.button_release_id)
-            #     delattr(self.window, 'button_release_id')
+
+        # Handle center vline drag release
+        if hasattr(self, 'center_drag_active') and self.center_drag_active:
+            self.center_drag_active = False
+            self.vline_gap = 0.0
+            self.center_drag_reference_pos = 0.0
+            self.window.moving_vline = None
+
+            # DON'T create background when center vline is dragged - just update positions
+            # Update data structure with new vline positions
+            if self.window.vline1 is not None and self.window.vline2 is not None:
+                vline1_x = self.window.vline1.get_xdata()[0]
+                vline2_x = self.window.vline2.get_xdata()[0]
+
+                sheet_name = self.window.sheet_combobox.GetValue()
+                if sheet_name in self.window.Data['Core levels']:
+                    if 'Background' not in self.window.Data['Core levels'][sheet_name]:
+                        self.window.Data['Core levels'][sheet_name]['Background'] = {}
+                    self.window.Data['Core levels'][sheet_name]['Background']['Bkg Low'] = float(min(vline1_x, vline2_x))
+                    self.window.Data['Core levels'][sheet_name]['Background']['Bkg High'] = float(max(vline1_x, vline2_x))
+
+            save_state(self.window)
+
+            # Clean up handlers
+            if hasattr(self.window, 'motion_cid'):
+                self.window.canvas.mpl_disconnect(self.window.motion_cid)
+                delattr(self.window, 'motion_cid')
+            if hasattr(self.window, 'release_cid'):
+                self.window.canvas.mpl_disconnect(self.window.release_cid)
+                delattr(self.window, 'release_cid')
+
+            return
+        elif self.ctrl_drag_active:
+            print(f"CTRL+drag ended")
+
+            # Reset CTRL+drag state
+            self.ctrl_drag_active = False
+            self.vline_gap = 0.0
+            self.ctrl_drag_reference_pos = 0.0
+
+            # Ensure moving_vline is None to prevent conflicts
+            self.window.moving_vline = None
+
+            # UPDATE BACKGROUND - Use the same logic as single vline dragging
+            if (self.window.background_tab_selected and
+                    hasattr(self.window, 'fitting_window') and self.window.fitting_window is not None):
+                # Update active region positions with new vLine positions (same as single vline)
+                self.update_active_region_positions()
+
+                # Redraw all regions in sequence (same as single vline)
+                self.redraw_all_regions_background()
+
+            # Alternative background update for Multi-Regions Smart only (non-fitting window case)
+            elif (self.window.background_tab_selected and
+                  hasattr(self.window, 'background_method') and
+                  self.window.background_method == "Multi-Regions Smart" and
+                  not hasattr(self.window, 'fitting_window')):
+                if hasattr(self.window, 'plot_manager'):
+                    print('Multi-Regions Smart fallback')
+                    self.window.plot_manager.plot_background(self.window)
+
+            # Save state after movement
+            save_state(self.window)
+
+            # Clean up motion and release handlers
+            if hasattr(self.window, 'motion_cid'):
+                self.window.canvas.mpl_disconnect(self.window.motion_cid)
+                delattr(self.window, 'motion_cid')
+            if hasattr(self.window, 'release_cid'):
+                self.window.canvas.mpl_disconnect(self.window.release_cid)
+                delattr(self.window, 'release_cid')
+
+            return  # CRITICAL: Exit here to prevent normal release handling
+
+        elif self.window.moving_vline is not None:
+            # Store which vline was moved before resetting to None
+            moved_vline = self.window.moving_vline
+
+            # Save state after vline movement and background update
+            save_state(self.window)
+
+            # Update VBM controls if VBM window is open
+            self.update_vbm_controls_from_vlines()
 
             # Use the correct variable names to disconnect events
             if hasattr(self.window, 'motion_cid'):
@@ -580,19 +1527,6 @@ class MouseEventHandler:
             # Reset the moving vline to None
             self.window.moving_vline = None
 
-            # # Rest of your existing code for updating background data...
-            # sheet_name = self.window.sheet_combobox.GetValue()
-            # if sheet_name in self.window.Data['Core levels']:
-            #     core_level_data = self.window.Data['Core levels'][sheet_name]
-            #     if 'Background' in core_level_data:
-            #         bg_low = core_level_data['Background']['Bkg Low']
-            #         bg_high = core_level_data['Background']['Bkg High']
-            #         # Update background if needed
-            #         if self.window.background_method == "Multi-Regions Smart":
-            #             self.window.plot_manager.plot_background(self.window)
-            #
-            # self.window.moving_vline = None
-
             sheet_name = self.window.sheet_combobox.GetValue()
             if sheet_name in self.window.Data['Core levels']:
                 core_level_data = self.window.Data['Core levels'][sheet_name]
@@ -603,6 +1537,16 @@ class MouseEventHandler:
                         core_level_data['Background']['Bkg Low'] = min(bg_low, bg_high)
                         core_level_data['Background']['Bkg High'] = max(bg_low, bg_high)
 
+                # Handle background redraw for fitting window cases
+                if (moved_vline in [self.window.vline1, self.window.vline2] and
+                        hasattr(self.window, 'fitting_window') and self.window.fitting_window is not None):
+                    # Update active region positions with new vLine positions
+                    self.update_active_region_positions()
+                    print('Regular vline drag - redrawing all regions')
+                    # Redraw all regions in sequence
+                    self.redraw_all_regions_background()
+
+        # Handle peak updates
         if self.window.selected_peak_index is not None:
             row = self.window.selected_peak_index * 2
             peak_x = float(self.window.peak_params_grid.GetCellValue(row, 2))
@@ -690,13 +1634,25 @@ class MouseEventHandler:
 
         menu.AppendSeparator()
 
-        # New peak operations
-        if row % 2 == 0:  # Parameter row - can delete this peak
+        # Add export to results grid option
+        export_item = menu.Append(wx.ID_ANY, "Export to Results Grid")
+        from libraries.FileMenu.Export import export_results
+        self.window.Bind(wx.EVT_MENU, lambda evt: export_results(self.window), export_item)
+
+        menu.AppendSeparator()
+
+
+
+        # New peak operations - available on both parameter and constraint rows
+        # Determine peak index and letter based on row type
+        if row % 2 == 0:  # Parameter row
             peak_index = row // 2
             peak_letter = self.window.peak_params_grid.GetCellValue(row, 0)
-            delete_item = menu.Append(wx.ID_ANY, f"Delete Peak {peak_letter}")
-        else:
-            delete_item = None
+        else:  # Constraint row
+            peak_index = row // 2  # Integer division gives us the peak index
+            peak_letter = self.window.peak_params_grid.GetCellValue(row - 1, 0)  # Get letter from parameter row above
+
+        delete_item = menu.Append(wx.ID_ANY, f"Delete Peak {peak_letter}")
 
         # Add peak submenu
         add_submenu = wx.Menu()
@@ -719,8 +1675,12 @@ class MouseEventHandler:
         propagate_text = "Propagate to column"
         propagate_diff_text = "Propagate difference to column"
 
-        if col in [2, 3, 4, 5, 6, 7, 8, 9] and row % 2 == 1:
-            param_row = row - 1
+        if col in [2, 3, 4, 5, 6, 7, 8, 9]:  # Available on both parameter and constraint rows
+            # Determine parameter row based on whether we're on parameter row or constraint row
+            if row % 2 == 0:  # Parameter row
+                param_row = row
+            else:  # Constraint row
+                param_row = row - 1
             peak_letter = self.window.peak_params_grid.GetCellValue(param_row, 0)
             col_names = {
                 2: "Positions", 3: "Heights", 4: "FWHMs", 5: "L/G ratios",
@@ -752,6 +1712,56 @@ class MouseEventHandler:
         if col == 4 and row % 2 == 1:
             propagate_diff_item = menu.Append(wx.ID_ANY, propagate_diff_text)
 
+        # NEW CODE - Add cross-core-level constraint menu
+        if col in [2, 3, 4, 5, 6, 7, 8, 9] :
+            menu.AppendSeparator()
+
+            # Create cross-core-level constraint submenu
+            cross_core_menu = wx.Menu()
+
+            # Get current sheet name for comparison
+            current_sheet_name = self.window.sheet_combobox.GetValue()
+
+            # Get all core levels that have fitting data
+            available_core_levels = {}
+            for core_level_name, core_level_data in self.window.Data['Core levels'].items():
+                if ('Fitting' in core_level_data and
+                        'Peaks' in core_level_data['Fitting'] and
+                        len(core_level_data['Fitting']['Peaks']) > 0):
+                    available_core_levels[core_level_name] = core_level_data['Fitting']['Peaks']
+
+            if available_core_levels:
+                # Create submenu for each core level
+                for core_level_name, peaks in available_core_levels.items():
+                    core_level_submenu = wx.Menu()
+
+                    # Add each peak as a menu item
+                    peak_keys = list(peaks.keys())
+                    for i, peak_key in enumerate(peak_keys):
+                        peak_letter = chr(65 + i)  # A, B, C, etc.
+                        constraint_ref = f"{core_level_name}_{peak_letter}"
+
+                        # Show just the letter if it's the same core level, otherwise show full reference
+                        if core_level_name == current_sheet_name:
+                            display_name = peak_letter  # Just "A", "B", "C"
+                        else:
+                            display_name = constraint_ref  # "C1s_A", "Sr3d_B", etc.
+
+                        # Create menu item for this peak
+                        peak_item = core_level_submenu.Append(wx.ID_ANY, display_name)
+
+                        # Bind the menu item to insert the constraint (always use full constraint_ref)
+                        self.window.Bind(wx.EVT_MENU,
+                                         lambda evt, ref=constraint_ref, r=row, c=col:
+                                         self.insert_cross_core_constraint(ref, r, c),
+                                         peak_item)
+
+                    # Add the core level submenu to the main cross-core menu
+                    cross_core_menu.AppendSubMenu(core_level_submenu, core_level_name)
+
+                # Add the main cross-core menu to the context menu
+                menu.AppendSubMenu(cross_core_menu, "Constraint to Other Core Levels")
+
         # Enable/disable items
         clipboard_file = os.path.join(tempfile.gettempdir(), 'khervefitting_peak_clipboard.json')
         has_clipboard_data = os.path.exists(clipboard_file)
@@ -759,9 +1769,8 @@ class MouseEventHandler:
 
         copy_item.Enable(has_rows)
         paste_item.Enable(has_clipboard_data)
-        if delete_item:
-            delete_item.Enable(has_rows)
-        propagate_item.Enable(col in [2, 3, 4, 5, 6, 7, 8, 9] and row % 2 == 1)
+        delete_item.Enable(has_rows)
+        propagate_item.Enable(col in [2, 3, 4, 5, 6, 7, 8, 9])
 
         # Bind events
         from libraries.FileMenu.Save import copy_all_peak_parameters, paste_all_peak_parameters
@@ -770,14 +1779,17 @@ class MouseEventHandler:
         self.window.Bind(wx.EVT_MENU, lambda evt: copy_all_peak_parameters(self.window), copy_item)
         self.window.Bind(wx.EVT_MENU, lambda evt: paste_all_peak_parameters(self.window), paste_item)
 
-        if delete_item:
-            self.window.Bind(wx.EVT_MENU, lambda evt: self.delete_peak_at_index(peak_index), delete_item)
+
+        self.window.Bind(wx.EVT_MENU, lambda evt: self.delete_peak_at_index(peak_index), delete_item)
 
         for i, add_item in enumerate(add_items):
             model = models[i]
             self.window.Bind(wx.EVT_MENU, lambda evt, m=model, r=row: self.add_peak_with_model(m, r), add_item)
 
-        self.window.Bind(wx.EVT_MENU, lambda evt: propagate_constraint(self.window, row, col), propagate_item)
+        # Always pass the constraint row to propagate_constraint
+        constraint_row = row + 1 if row % 2 == 0 else row
+        self.window.Bind(wx.EVT_MENU, lambda evt: propagate_constraint(self.window, constraint_row, col),
+                         propagate_item)
         if propagate_diff_item:
             self.window.Bind(wx.EVT_MENU, lambda evt: propagate_fwhm_difference(self.window, row, col),
                              propagate_diff_item)
@@ -1226,8 +2238,12 @@ class MouseEventHandler:
     def create_peak_data_for_model(self, model_name, peak_x, peak_y, sheet_name):
         """Create peak data structure for specific model"""
         # Get background range
-        bg_low = self.window.bg_min_energy
-        bg_high = self.window.bg_max_energy
+        if (hasattr(self.window, 'fitting_window') and
+                hasattr(self.window.fitting_window, 'get_overall_background_range')):
+            bg_low, bg_high = self.window.fitting_window.get_overall_background_range()
+        else:
+            bg_low = self.window.bg_min_energy
+            bg_high = self.window.bg_max_energy
         position_constraint = f"{bg_low:.2f},{bg_high:.2f}"
 
         # Base peak data
@@ -1338,6 +2354,18 @@ class MouseEventHandler:
             })
 
         return peak_data
+
+    def update_vbm_controls_from_vlines(self):
+        """Update VBM controls when vlines move"""
+        if (hasattr(self.window, 'vb_measurements_window') and
+                self.window.vb_measurements_window is not None):
+            try:
+                self.window.vb_measurements_window.update_controls_from_vlines()
+                # print("VBM controls updated")  # Debug line
+            except Exception as e:
+                print(f"Error updating VBM controls: {e}")
+        # else:
+        #     print("No VBM window found")  # Debug line
 
 
 

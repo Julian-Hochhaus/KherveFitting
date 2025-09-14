@@ -15,7 +15,7 @@ class PeakFittingGrid:
         self.window = main_window
 
     # Peak parameter methods
-    def add_peak_params(self):
+    def add_peak_params(self, custom_peak_x=None, custom_peak_y=None):
         if hasattr(self.window, 'fitting_window'):
             self.window.selected_fitting_method = self.window.fitting_window.model_combobox.GetValue()
             print(f'Fitting method: {self.window.selected_fitting_method}')
@@ -30,11 +30,20 @@ class PeakFittingGrid:
 
         num_peaks = self.window.peak_params_grid.GetNumberRows() // 2
 
-        # Update bg_min_energy and bg_max_energy from window.Data
-        if sheet_name in self.window.Data['Core levels'] and 'Background' in self.window.Data['Core levels'][sheet_name]:
-            background_data = self.window.Data['Core levels'][sheet_name]['Background']
-            self.window.bg_min_energy = background_data.get('Bkg Low')
-            self.window.bg_max_energy = background_data.get('Bkg High')
+        # Get overall background range from all recorded ranges instead of just current range
+        if (hasattr(self.window, 'fitting_window') and
+                hasattr(self.window.fitting_window, 'get_overall_background_range')):
+            overall_bg_low, overall_bg_high = self.window.fitting_window.get_overall_background_range()
+            # Update the window's bg values to use overall range
+            self.window.bg_min_energy = overall_bg_low
+            self.window.bg_max_energy = overall_bg_high
+        else:
+            # Fallback to original method
+            if sheet_name in self.window.Data['Core levels'] and 'Background' in self.window.Data['Core levels'][
+                sheet_name]:
+                background_data = self.window.Data['Core levels'][sheet_name]['Background']
+                self.window.bg_min_energy = background_data.get('Bkg Low')
+                self.window.bg_max_energy = background_data.get('Bkg High')
 
         # Ensure bg_min_energy and bg_max_energy are not None
         if self.window.bg_min_energy is None or self.window.bg_max_energy is None:
@@ -42,24 +51,27 @@ class PeakFittingGrid:
                           wx.OK | wx.ICON_WARNING)
             return
 
-        if num_peaks == 0:
-            residual = self.window.y_values - np.array(self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'])
-            peak_y = residual[np.argmax(residual)]
-            peak_x = self.window.x_values[np.argmax(residual)]
+        # Use custom values if provided, otherwise find peak position from residuals
+        if custom_peak_x is not None and custom_peak_y is not None:
+            peak_x = custom_peak_x
+            peak_y = custom_peak_y
         else:
-
-            # Call update_overall_fit_and_residuals to get the residuals
-            residual = self.window.plot_manager.update_overall_fit_and_residuals(self.window)
-
-            if residual is not None:
-                peak_y = residual.max()
+            if num_peaks == 0:
+                residual = self.window.y_values - np.array(self.window.Data['Core levels'][sheet_name]['Background']['Bkg Y'])
+                peak_y = residual[np.argmax(residual)]
                 peak_x = self.window.x_values[np.argmax(residual)]
             else:
-                # Fallback if residuals couldn't be calculated
-                wx.MessageBox("Unable to calculate residuals. Using default peak position.", "Warning",
-                              wx.OK | wx.ICON_WARNING)
-                peak_y = self.window.y_values.max()
-                peak_x = self.window.x_values[np.argmax(self.window.y_values)]
+                # Call update_overall_fit_and_residuals to get the residuals
+                residual = self.window.plot_manager.update_overall_fit_and_residuals(self.window)
+
+                if residual is not None:
+                    peak_y = residual.max()
+                    peak_x = self.window.x_values[np.argmax(residual)]
+                else:
+                    # Fallback if residuals couldn't be calculated
+                    wx.MessageBox("Unable to calculate residuals. Using default peak position.")
+                    peak_y = self.window.y_values.max()
+                    peak_x = self.window.x_values[np.argmax(self.window.y_values)]
 
         self.window.peak_count += 1
 
@@ -71,11 +83,16 @@ class PeakFittingGrid:
         # Assign letter IDs
         letter_id = chr(64 + self.window.peak_count)
 
+        # Extract core level name using the existing method from plot manager
+        core_level_name = self.window.plot_manager.extract_core_level_name(sheet_name)
+        if core_level_name is None:
+            core_level_name = sheet_name  # Fallback to sheet_name if extraction fails
 
         # Set values in the grid
         self.window.peak_params_grid.SetCellValue(row, 0, letter_id)
         self.window.peak_params_grid.SetReadOnly(row, 0)
-        self.window.peak_params_grid.SetCellValue(row, 1, f"{sheet_name} p{self.window.peak_count}")
+        # self.window.peak_params_grid.SetCellValue(row, 1, f"{sheet_name} p{self.window.peak_count}")
+        self.window.peak_params_grid.SetCellValue(row, 1, f"{core_level_name} p{self.window.peak_count}")
         self.window.peak_params_grid.SetCellValue(row, 2, f"{peak_x:.2f}")
         self.window.peak_params_grid.SetCellValue(row, 3, f"{peak_y:.2f}")
         if is_raman:
@@ -87,6 +104,15 @@ class PeakFittingGrid:
         if self.window.selected_fitting_method in ["LA (Area, \u03c3, \u03b3)", "LA (Area, \u03c3/\u03b3, \u03b3)",
                                                    "LA*G (Area, \u03c3/\u03b3, \u03b3)"]:
             self.window.peak_params_grid.SetCellValue(row, 6, f"{peak_y * fwhm_val * 1.064:.2f}")
+        elif self.window.selected_fitting_method in ['SGL (Area)']:
+            # For SGL, we use a different area calculation
+            # area = peak_y * fwhm_val * 1.064
+            fwhm = 15 if is_raman else 1.6
+            fraction = 20
+            sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+            gamma = fwhm / 2
+            area = peak_y * ((1 - fraction / 100) * sigma * np.sqrt(2 * np.pi) + (fraction / 100) * np.pi * gamma)
+            self.window.peak_params_grid.SetCellValue(row, 6, f"{area:.2f}")
         else:
             self.window.peak_params_grid.SetCellValue(row, 6, f"{peak_y * fwhm_val * 1.064:.2f}")
         if self.window.selected_fitting_method == "ExpGauss.(Area, \u03c3, \u03b3)":
@@ -203,6 +229,7 @@ class PeakFittingGrid:
 
         # Set constraint values
         self.window.peak_params_grid.SetReadOnly(row + 1, 0)
+        # self.window.peak_params_grid.SetCellValue(row+1, 1, "Constraints")
         for col in range(self.window.peak_params_grid.GetNumberCols()+1):  # Assuming you have 15 columns in total
             # self.window.peak_params_grid.SetCellBackgroundColour(row + 1, col, wx.Colour(230, 230, 230))
             self.window.peak_params_grid.SetCellBackgroundColour(row + 1, col, wx.Colour(200,245,228))
@@ -510,6 +537,7 @@ class PeakFittingGrid:
                 }
             })
         elif self.window.selected_fitting_method in ["SGL (Area)"]:
+            print("SGL (Area) selected")
             # Value required to calculate area
             fwhm = 15 if is_raman else 1.6
             fraction = 20
@@ -523,6 +551,7 @@ class PeakFittingGrid:
             peak_data.update({
                 'Area': sgl_area,
                 'FWHM': fwhm,
+                'L/G': fraction,
                 'Constraints': {
                     'Position': position_constraint,
                     'Height': "1:1e7",
@@ -535,9 +564,12 @@ class PeakFittingGrid:
                 }
             })
 
-        self.window.Data['Core levels'][sheet_name]['Fitting']['Peaks'][sheet_name + f" p{self.window.peak_count}"] = peak_data
+        self.window.Data['Core levels'][sheet_name]['Fitting']['Peaks'][core_level_name + f" p{self.window.peak_count}"] = peak_data
         # print(self.window.Data)
         self.window.show_hide_vlines()
+
+        # Update the peak split and ratios
+        self.window.update_ratios()
 
         # Call the method to clear and replot everything
         self.window.clear_and_replot()
@@ -565,11 +597,18 @@ class PeakFittingGrid:
             8: '0.3:3',  # Gamma
             9: '0.01:2' # Skew
         }
-        # Check each constraint cell
-        for col_idx in range(2, 10):
-            if not self.window.peak_params_grid.GetCellValue(row, col_idx).strip():
-                # If empty, set default constraint
-                self.window.peak_params_grid.SetCellValue(row, col_idx, default_constraints[col_idx])
+        # Check each constraint cell with bounds checking
+        constraint_row = row + 1
+        max_rows = self.window.peak_params_grid.GetNumberRows()
+        max_cols = self.window.peak_params_grid.GetNumberCols()
+
+        # Only proceed if constraint row exists
+        if constraint_row < max_rows:
+            for col_idx in range(2, min(10, max_cols)):  # Don't exceed column bounds
+                # Check if constraint cell is empty
+                if not self.window.peak_params_grid.GetCellValue(constraint_row, col_idx).strip():
+                    # If empty, set default constraint
+                    self.window.peak_params_grid.SetCellValue(constraint_row, col_idx, default_constraints[col_idx])
 
         # Also update constraints in Data structure
         peak_index = row // 2
@@ -812,8 +851,16 @@ class PeakFittingGrid:
                 print(f'Current split: {current_split}')
                 ref_split = float(self.window.peak_params_grid.GetCellValue(letter_index * 2, 12))
                 split_diff = current_split - ref_split
+                print(f'Split Diff: {split_diff}')
+
                 if split_diff != 0:
-                    new_value = f"{new_value.upper()}+{split_diff:.2f}#0.1"
+                    if split_diff >= 0:
+                        print('SPLIT POS')
+                        new_value = f"{new_value.upper()}+{split_diff:.2f}#0.1"
+                    else:
+                        print('SPLIT NEG')
+                        new_value = f"{new_value.upper()}{split_diff:.2f}#0.1"  # split_diff is already negative
+                        print(f'New value: {new_value}')
                 else:
                     new_value = new_value.upper() + '*1'
         elif col == 6 and new_value.upper() in 'ABCDEFGHIJKLMNOP':
@@ -851,12 +898,108 @@ class PeakFittingGrid:
                 new_value = new_value.upper() + '*1'
             self.window.peak_params_grid.SetCellValue(row, col, new_value)
 
+        # NEW CODE - Handle cross-core-level constraint auto-expansion with error checking
+        elif row % 2 == 1 and col in [2, 3, 4, 5, 6, 7, 8, 9]:
+            # Check if it matches cross-core-level pattern like "C1s_A", "sr3d_a", "Sr3d_A"
+            cross_core_pattern = r'^([^_]+)_([A-Pa-p])$'
+            match = re.match(cross_core_pattern, new_value, re.IGNORECASE)
+
+            if match:
+                core_level_name, peak_letter = match.groups()
+
+                # Normalize the peak letter to uppercase
+                peak_letter = peak_letter.upper()
+
+                # Find the core level with case-insensitive matching
+                actual_core_level_name = None
+                for existing_name in self.window.Data['Core levels'].keys():
+                    if existing_name.lower() == core_level_name.lower():
+                        actual_core_level_name = existing_name
+                        break
+
+                # Error: Core level doesn't exist
+                if not actual_core_level_name:
+                    wx.MessageBox(f"Core level '{core_level_name}' does not exist.",
+                                  "Invalid Core Level Reference", wx.OK | wx.ICON_ERROR)
+                    event.Veto()
+                    return
+
+                core_level_data = self.window.Data['Core levels'][actual_core_level_name]
+
+                # Error: Core level has no fitting data
+                if ('Fitting' not in core_level_data or
+                        'Peaks' not in core_level_data['Fitting']):
+                    wx.MessageBox(f"Core level '{actual_core_level_name}' has no fitted peaks.",
+                                  "Invalid Peak Reference", wx.OK | wx.ICON_ERROR)
+                    event.Veto()
+                    return
+
+                peaks = core_level_data['Fitting']['Peaks']
+                peak_keys = list(peaks.keys())
+                peak_index = ord(peak_letter) - ord('A')
+
+                # Error: Peak letter doesn't exist in that core level
+                if peak_index >= len(peak_keys):
+                    wx.MessageBox(f"Peak {peak_letter} does not exist in core level '{actual_core_level_name}'.",
+                                  "Invalid Peak Reference", wx.OK | wx.ICON_ERROR)
+                    event.Veto()
+                    return
+
+                # Success: Expand the constraint
+                peak_key = peak_keys[peak_index]
+                ref_peak_data = peaks[peak_key]
+
+                # Use the actual core level name in the constraint
+                normalized_ref = f"{actual_core_level_name}_{peak_letter}"
+
+                if col == 2:  # Position constraint
+                    # Get current position and reference position
+                    current_pos = float(self.window.peak_params_grid.GetCellValue(row - 1, col))
+                    ref_pos = float(ref_peak_data.get('Position', current_pos))
+
+                    # Calculate difference
+                    difference = current_pos - ref_pos
+
+                    # Create constraint string
+                    if difference >= 0:
+                        new_value = f"{normalized_ref}+{difference:.2f}#0.1"
+                    else:
+                        new_value = f"{normalized_ref}{difference:.2f}#0.1"  # difference is already negative
+
+                elif col == 6:  # Area constraint
+                    # Get current area and reference area for ratio calculation
+                    current_area = float(self.window.peak_params_grid.GetCellValue(row - 1, col))
+                    ref_area = float(ref_peak_data.get('Area', current_area))
+
+                    # Calculate ratio
+                    ratio = (current_area / ref_area) if ref_area != 0 else 1
+
+                    if ratio != 1:
+                        new_value = f"{normalized_ref}*{ratio:.2f}#0.01"
+                    else:
+                        new_value = f"{normalized_ref}*1"
+
+                else:  # FWHM, Sigma, Gamma, Height, L/G, Skew
+                    # For non-position/area parameters, just add *1
+                    new_value = f"{normalized_ref}*1"
+
+                # Update the cell with expanded constraint
+                self.window.peak_params_grid.SetCellValue(row, col, new_value)
+
         # Convert lowercase to uppercase in expressions like a*0.5
-        if '*' in new_value or '+' in new_value:
-            parts = new_value.split('*' if '*' in new_value else '+')
+        if '*' in new_value or '+' in new_value or '-' in new_value:
+            # Determine the operator and split accordingly
+            if '*' in new_value:
+                operator = '*'
+            elif '+' in new_value:
+                operator = '+'
+            else:  # '-' in new_value
+                operator = '-'
+
+            parts = new_value.split(operator)
             if len(parts) == 2 and parts[0].lower() in 'abcdefghij':
                 parts[0] = parts[0].upper()
-                new_value = ('*' if '*' in new_value else '+').join(parts)
+                new_value = operator.join(parts)
                 self.window.peak_params_grid.SetCellValue(row, col, new_value)
 
         if sheet_name in self.window.Data['Core levels'] and 'Fitting' in self.window.Data['Core levels'][sheet_name] and 'Peaks' in \
@@ -1213,20 +1356,36 @@ class PeakFittingGrid:
             row_constraint = i * 2 + 1  # Constraint row
             peak_label = self.window.peak_params_grid.GetCellValue(row_data, 1)
 
-            # Update main parameters
+            # Update main parameters with safe conversion
+            sigma_str = self.window.peak_params_grid.GetCellValue(row_data, 7)
+            gamma_str = self.window.peak_params_grid.GetCellValue(row_data, 8)
+
+            # def safe_float_convert(value_str):
+            #     """Convert string to float, return 0.0 if it's a constraint string or invalid"""
+            #     if not value_str or ':' in value_str or '*' in value_str or '#' in value_str or '+' in value_str or '-' in value_str:
+            #         return 0.0
+            #     try:
+            #         return float(value_str)
+            #     except ValueError:
+            #         return 0.0
+
+            # Update main parameters with safe conversion
+            sigma_str = self.window.peak_params_grid.GetCellValue(row_data, 7)
+            gamma_str = self.window.peak_params_grid.GetCellValue(row_data, 8)
+
             peaks[peak_label] = {
                 'Position': float(self.window.peak_params_grid.GetCellValue(row_data, 2)),
                 'Height': float(self.window.peak_params_grid.GetCellValue(row_data, 3)),
                 'FWHM': float(self.window.peak_params_grid.GetCellValue(row_data, 4)),
                 'L/G': float(self.window.peak_params_grid.GetCellValue(row_data, 5)),
                 'Area': float(self.window.peak_params_grid.GetCellValue(row_data, 6)),
-                'Sigma': float(self.window.peak_params_grid.GetCellValue(row_data, 7)) if self.window.peak_params_grid.GetCellValue(row_data, 7) else 0.0,
-                'Gamma': float(self.window.peak_params_grid.GetCellValue(row_data, 8)) if self.window.peak_params_grid.GetCellValue(row_data, 8) else 0.0,
-                'Skew': float(self.window.peak_params_grid.GetCellValue(row_data, 9)),
+                'Sigma': self.safe_float_convert(sigma_str),  # No self.
+                'Gamma': self.safe_float_convert(gamma_str),  # No self.
+                    'Skew': float(self.window.peak_params_grid.GetCellValue(row_data, 9)),
                 'Fitting Model': self.window.peak_params_grid.GetCellValue(row_data, 13)
             }
-
             # Update constraints
+
             if 'Constraints' not in peaks[peak_label]:
                 peaks[peak_label]['Constraints'] = {}
 
@@ -1359,6 +1518,14 @@ class PeakFittingGrid:
                     self.window.peak_params_grid.SetCellValue(row, 6, "ER! REFRESH PEAK")
             self.window.peak_params_grid.ForceRefresh()
 
+    def safe_float_convert(self, value_str):
+        """Convert string to float, return 0.0 if it's a constraint string or invalid"""
+        if not value_str or ':' in value_str or '*' in value_str or '#' in value_str or '+' in value_str or '-' in value_str:
+            return 2
+        try:
+            return float(value_str)
+        except ValueError:
+            return 2
 
 
 

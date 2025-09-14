@@ -260,9 +260,23 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
 
     num_peaks = peak_params_grid.GetNumberRows() // 2
 
-    bg_min_energy = core_level_data['Background'].get('Bkg Low')
-    bg_max_energy = core_level_data['Background'].get('Bkg High')
+    # Get overall background range from all recorded ranges instead of just current range
+    if (hasattr(window, 'fitting_window') and
+            hasattr(window.fitting_window, 'get_overall_background_range')):
+        bg_min_energy, bg_max_energy = window.fitting_window.get_overall_background_range()
+    else:
+        # Fallback to original method
+        bg_min_energy = core_level_data['Background'].get('Bkg Low')
+        bg_max_energy = core_level_data['Background'].get('Bkg High')
 
+        try:
+            bg_min_energy = float(bg_min_energy)
+            bg_max_energy = float(bg_max_energy)
+        except (ValueError, TypeError):
+            bg_min_energy = min(x_values)
+            bg_max_energy = max(x_values)
+
+    # Ensure we have valid float values
     try:
         bg_min_energy = float(bg_min_energy)
         bg_max_energy = float(bg_max_energy)
@@ -321,6 +335,18 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
                 area_min, area_max, area_vary = parse_constraints(peak_params_grid.GetCellValue(row + 1, 6),
                                                                   area, peak_params_grid, i, "area")
 
+                # Resolve Cross_Core_constraint
+                center_min = resolve_cross_core_constraint(window, center_min, 'center')
+                center_max = resolve_cross_core_constraint(window, center_max, 'center')
+                height_min = resolve_cross_core_constraint(window, height_min, 'height')
+                height_max = resolve_cross_core_constraint(window, height_max, 'height')
+                area_min = resolve_cross_core_constraint(window, area_min, 'area')
+                area_max = resolve_cross_core_constraint(window, area_max, 'area')
+                fwhm_min = resolve_cross_core_constraint(window, fwhm_min, 'fwhm')
+                fwhm_max = resolve_cross_core_constraint(window, fwhm_max, 'fwhm')
+                lg_ratio_min = resolve_cross_core_constraint(window, lg_ratio_min, 'lg_ratio')
+                lg_ratio_max = resolve_cross_core_constraint(window, lg_ratio_max, 'lg_ratio')
+
                 center_min = evaluate_constraint(center_min, peak_params_grid, 'center', center)
                 center_max = evaluate_constraint(center_max, peak_params_grid, 'center', center)
                 height_min = evaluate_constraint(height_min, peak_params_grid, 'height', height)
@@ -333,6 +359,14 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
                 fwhm_max = evaluate_constraint(fwhm_max, peak_params_grid, 'fwhm', fwhm)
                 lg_ratio_min = evaluate_constraint(lg_ratio_min, peak_params_grid, 'lg_ratio', lg_ratio)
                 lg_ratio_max = evaluate_constraint(lg_ratio_max, peak_params_grid, 'lg_ratio', lg_ratio)
+
+                # Enforce minimum L/G ratio of 0.01 to prevent mathematical issues
+                if lg_ratio <= 0:
+                    lg_ratio = 0.001
+                if lg_ratio_min < 0.01:
+                    lg_ratio_min = 0.001
+                # Ensure lg_ratio is within bounds
+                lg_ratio = max(lg_ratio_min, lg_ratio)
 
                 prefix = f'peak{i}_'
                 if peak_model_choice == "Voigt (Area, L/G, \u03c3)":
@@ -355,6 +389,13 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
                     sigma_max = evaluate_constraint(sigma_max, peak_params_grid, 'sigma', sigma)
                     fraction_min = evaluate_constraint(fraction_min, peak_params_grid, 'lg_ratio', fraction)
                     fraction_max = evaluate_constraint(fraction_max, peak_params_grid, 'lg_ratio', fraction)
+
+                    # Special handling for Voigt models: convert "Fixed" to ±0.01 range
+                    constraint_text = peak_params_grid.GetCellValue(row + 1, 5).strip()
+                    if constraint_text.lower() == "fixed":
+                        fraction_min = max(0.1, fraction - 0.1)
+                        fraction_max = min(99.9, fraction + 0.1)
+                        fraction_vary = True
 
                     # Calculate gamma, gamma_min, and gamma_max
                     def calc_gamma(f, s):
@@ -419,6 +460,13 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
                     fraction_max = evaluate_constraint(fraction_max, peak_params_grid, 'lg_ratio', fraction)
                     skew_min = evaluate_constraint(skew_min, peak_params_grid, 'skew', skew)
                     skew_max = evaluate_constraint(skew_max, peak_params_grid, 'skew', skew)
+
+                    # Special handling for Voigt models: convert "Fixed" to ±0.01 range
+                    constraint_text = peak_params_grid.GetCellValue(row + 1, 5).strip()
+                    if constraint_text.lower() == "fixed":
+                        fraction_min = max(0.01, fraction - 0.01)
+                        fraction_max = min(99.99, fraction + 0.01)
+                        fraction_vary = True
 
                     # Calculate gamma
                     def calc_gamma(f, s):
@@ -736,7 +784,7 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
                                vary=lg_ratio_vary)
                 elif peak_model_choice == "Unfitted":
                     return
-                elif peak_model_choice == "D-parameter":
+                elif peak_model_choice in ["D-parameter", "Fermi", "VBM", "Cut-Off"]:
                     # Skip fitting for D-parameter
                     return
                 else:
@@ -816,29 +864,60 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
 
                 if peak_label in existing_peaks:
                     center = result.params[f'{prefix}center'].value
-                    if peak_model_choice in["Voigt (Area, L/G, \u03c3)","Voigt (Area, \u03c3, \u03b3)"]: #, "Voigt (Area, L/G, \u03c3, S)"]:
+                    if peak_model_choice == "Voigt (Area, L/G, \u03c3)":
                         amplitude = result.params[f'{prefix}amplitude'].value
                         sigma = result.params[f'{prefix}sigma'].value
                         gamma = result.params[f'{prefix}gamma'].value
                         height = PeakFunctions.get_voigt_height(amplitude, sigma, gamma)
                         fwhm = PeakFunctions.voigt_fwhm(sigma, gamma)
-                        fraction = (2*gamma) / (sigma*2.355 + 2*gamma) * 100
-                        area = amplitude # * (sigma * np.sqrt(2 * np.pi))
+
+                        # Check if L/G constraint is Fixed for this peak
+                        lg_constraint = peak_params_grid.GetCellValue(row + 1, 5).strip()
+                        if lg_constraint.lower() == "fixed":
+                            # Keep original fraction value and recalculate gamma from fixed fraction and fitted sigma
+                            fraction = float(peak_params_grid.GetCellValue(row, 5))  # Original fraction
+                            # Recalculate gamma from fixed fraction: gamma = (fraction/100) * sigma / (1 - fraction/100)
+                            new_gamma = (fraction / 100) * sigma * 2.355 / (2 - 2 * fraction / 100)
+                            gamma = new_gamma
+                            # Update fwhm with new gamma
+                            fwhm = PeakFunctions.voigt_fwhm(sigma, new_gamma)
+                        else:
+                            # Normal behavior: calculate fraction from fitted sigma and gamma
+                            fraction = (2 * gamma) / (sigma * 2.355 + 2 * gamma) * 100
+
+                        area = amplitude
+
+                    elif peak_model_choice == "Voigt (Area, \u03c3, \u03b3)":
+                        amplitude = result.params[f'{prefix}amplitude'].value
+                        sigma = result.params[f'{prefix}sigma'].value
+                        gamma = result.params[f'{prefix}gamma'].value
+                        height = PeakFunctions.get_voigt_height(amplitude, sigma, gamma)
+                        fwhm = PeakFunctions.voigt_fwhm(sigma, gamma)
+                        # Normal behavior for sigma/gamma model
+                        fraction = (2 * gamma) / (sigma * 2.355 + 2 * gamma) * 100
+                        area = amplitude
 
                     elif peak_model_choice == "Voigt (Area, L/G, \u03c3, S)":
                         amplitude = result.params[f'{prefix}amplitude'].value
                         sigma = result.params[f'{prefix}sigma'].value
                         gamma = result.params[f'{prefix}gamma'].value
-                        skew  = result.params[f'{prefix}skew'].value
+                        skew = result.params[f'{prefix}skew'].value
                         height = PeakFunctions.get_skewedvoigt_height(amplitude, sigma, gamma, skew)
-                        peak_params_grid.SetCellValue(row, 3, f"{height:.2f}")  # Update height in grid
-                        # amplitude = height / max_height
-                        fwhm = PeakFunctions.skewed_voigt_fwhm(sigma, gamma, skew)
-                        fraction = (2 * gamma) / (sigma * 2.355 + 2 * gamma) * 100
+                        peak_params_grid.SetCellValue(row, 3, f"{height:.2f}")
+
+                        # Check if L/G constraint is Fixed for this peak
+                        lg_constraint = peak_params_grid.GetCellValue(row + 1, 5).strip()
+                        if lg_constraint.lower() == "fixed":
+                            # Keep original fraction value and recalculate gamma
+                            fraction = float(peak_params_grid.GetCellValue(row, 5))  # Original fraction
+                            new_gamma = (fraction / 100) * sigma * 2.355 / (2 - 2 * fraction / 100)
+                            gamma = new_gamma
+                            fwhm = PeakFunctions.skewed_voigt_fwhm(sigma, new_gamma, skew)
+                        else:
+                            # Normal behavior: calculate fraction from fitted sigma and gamma
+                            fraction = (2 * gamma) / (sigma * 2.355 + 2 * gamma) * 100
+                            fwhm = PeakFunctions.skewed_voigt_fwhm(sigma, gamma, skew)
                         area = amplitude
-                        # print(f'Into Voigt (Area, L/G, \u03c3, skew): H {height}  w {fwhm}')
-
-
                     elif peak_model_choice == "DS (A, \u03c3, \u03b3)":
                         amplitude = result.params[f'{prefix}amplitude'].value
                         center = result.params[f'{prefix}center'].value
@@ -852,17 +931,7 @@ def fit_peaks(window, peak_params_grid, evaluate=False):
                         # Get height directly from model
                         height = model.eval(x=np.array([center]), amplitude=amplitude, center=center,
                                             sigma=sigma, gamma=gamma, asymmetry=skew)[0]
-                        # print(f'DS Height: {height}')
-                        # print(f'DS Amplitude : {amplitude}')
-                        # amplitude_calc = PeakFunctions.doniach_sunjic_height_to_amplitude(height, sigma, gamma, skew)
-                        # print(f'DS Amplitude calculated: {amplitude_calc}')
                         area_calc= PeakFunctions.doniach_sunjic_height_to_area(height, sigma, gamma, skew)
-                        # print(f'DS Area calculated: {area_calc}')
-                        # height_calc = PeakFunctions.doniach_sunjic_area_to_height(area_calc, sigma, gamma, skew)
-                        # print(f'DS Height inverse: {height_calc}')
-                        # amplitude_calc2 = PeakFunctions.doniach_sunjic_area_to_amplitude(area_calc, sigma, gamma, skew)
-                        # print(f'DS Amplitude calculated from area: {amplitude_calc2}')
-
                         # Calculate height numerically using the SAME x array
                         y_values = model.eval(x=x_values_filtered, amplitude=amplitude, center=center,
                                               sigma=sigma, gamma=gamma, asymmetry=skew)
@@ -1263,12 +1332,33 @@ def parse_constraints(constraint_str, current_value, peak_params_grid, peak_inde
     pattern_simple = r'^([A-P])([+\-*/])(\d+\.?\d*)$'
     match_simple = re.match(pattern_simple, constraint_str)
 
+    # NEW CODE - Pattern for cross-core-level constraints: C1s_A*1.5#0.1
+    pattern_cross_core = r'^([^_]+_[A-P])([+\-*/])([0-9]*\.?[0-9]+)(?:#([0-9]*\.?[0-9]+))?$'
+    match_cross_core = re.match(pattern_cross_core, constraint_str)
+
     if constraint_str in ['Fixed']:
         small_error3 = 0.001
         if param_name in ["L/G", "fraction"]:
             return current_value - 0.5, current_value + 0.5, False
         else:
             return current_value - small_error3, current_value + small_error3, False
+
+        # NEW CODE - Handle cross-core-level constraints
+    elif match_cross_core:
+        core_level_ref, operator, value, delta = match_cross_core.groups()
+        value = float(value)
+        delta = float(delta) if delta else 0.1
+        if operator in ['+', '-']:
+            return (f"{core_level_ref}{operator}{value - delta}", f"{core_level_ref}{operator}{value + delta}", True)
+        elif operator in ['*', '/']:
+            if param_name in ['POSITION', 'FWHM', 'L/G', 'fwhm_g']:
+                delta_percent = delta
+                return (f"{core_level_ref}{operator}{value - delta_percent}",
+                        f"{core_level_ref}{operator}{value + delta_percent}", True)
+            else:
+                return (f"{core_level_ref}{operator}{value - delta}", f"{core_level_ref}{operator}{value + delta}",
+                        True)
+
     elif match:
         ref_peak, operator, value, delta = match.groups()
         value = float(value)
@@ -1344,6 +1434,89 @@ def evaluate_constraint(constraint, peak_params_grid, param_name, current_value)
         return current_value
 
 
+def get_cross_core_level_value(window, core_level_ref, param_type):
+    """Get parameter value from another core level"""
+    try:
+        if '_' not in core_level_ref:
+            return None
+
+        core_level_name, peak_letter = core_level_ref.split('_', 1)
+        peak_index = ord(peak_letter) - ord('A')
+
+        if core_level_name not in window.Data['Core levels']:
+            return None
+
+        core_level_data = window.Data['Core levels'][core_level_name]
+
+        if 'Fitting' not in core_level_data or 'Peaks' not in core_level_data['Fitting']:
+            return None
+
+        peaks = core_level_data['Fitting']['Peaks']
+        peak_keys = list(peaks.keys())
+
+        if peak_index >= len(peak_keys):
+            return None
+
+        peak_key = peak_keys[peak_index]
+        peak_data = peaks[peak_key]
+
+        # Map param_type to actual data keys
+        param_map = {
+            'center': 'Position',
+            'Position': 'Position',
+            'height': 'Height',
+            'Height': 'Height',
+            'area': 'Area',
+            'Area': 'Area',
+            'fwhm': 'FWHM',
+            'FWHM': 'FWHM',
+            'sigma': 'Sigma',
+            'Sigma': 'Sigma',
+            'gamma': 'Gamma',
+            'Gamma': 'Gamma',
+            'skew': 'Skew',
+            'Skew': 'Skew'
+        }
+
+        actual_param = param_map.get(param_type, param_type)
+        if actual_param in peak_data:
+            return float(peak_data[actual_param])
+
+        return None
+
+    except (ValueError, IndexError, KeyError):
+        return None
+
+
+def resolve_cross_core_constraint(window, constraint_str, param_name):
+    """Resolve cross-core-level constraint to actual numeric value"""
+    if not isinstance(constraint_str, str) or '_' not in constraint_str:
+        return constraint_str
+
+    import re
+    pattern = r'^([^_]+_[A-P])([+\-*/])([0-9]*\.?[0-9]+)(?:#([0-9]*\.?[0-9]+))?$'
+    match = re.match(pattern, constraint_str)
+
+    if not match:
+        return constraint_str
+
+    core_level_ref, operator, value_str, error_str = match.groups()
+    value = float(value_str)
+
+    ref_value = get_cross_core_level_value(window, core_level_ref, param_name)
+    if ref_value is None:
+        return constraint_str  # Return original if can't resolve
+
+    if operator == '*':
+        return ref_value * value
+    elif operator == '/':
+        return ref_value / value if value != 0 else ref_value
+    elif operator == '+':
+        return ref_value + value
+    elif operator == '-':
+        return ref_value - value
+
+    return constraint_str
 
 # WHERE IS IT USED???
 def format_sheet_name2(sheet_name):

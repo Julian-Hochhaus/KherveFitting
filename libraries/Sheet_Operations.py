@@ -113,17 +113,6 @@ def on_sheet_selected(window, event):
                     window.peak_params_grid.SetCellValue(row, 17, f"{peak_data.get('Bkg Offset Low', '0')}")
                     window.peak_params_grid.SetCellValue(row, 18, f"{peak_data.get('Bkg Offset High', '0')}")
 
-                    # Set constraints if available
-                    # if 'Constraints' in peak_data:
-                    #     constraints = peak_data['Constraints']
-                    #     window.peak_params_grid.SetCellValue(row + 1, 2, str(constraints.get('Position', '1:1200')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 3, str(constraints.get('Height', '1:1e7')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 4, str(constraints.get('FWHM', '0.3:3.5')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 5, str(constraints.get('L/G', '2:80')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 6, str(constraints.get('Area', '1:1e7')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 7, str(constraints.get('Sigma', '0.3:2')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 8, str(constraints.get('Gamma', '0.3:2')))
-                    #     window.peak_params_grid.SetCellValue(row + 1, 9, str(constraints.get('Skew', '0.01:2')))
                     if 'Constraints' in peak_data:
                         constraints = peak_data['Constraints']
 
@@ -301,7 +290,7 @@ def on_sheet_selected(window, event):
                             # window.peak_params_grid.SetCellValue(row + 1, col, "0")
                             window.peak_params_grid.SetCellTextColour(row, col, wx.Colour(255, 255, 255))
                             window.peak_params_grid.SetCellTextColour(row + 1, col, wx.Colour(200, 245, 228))
-                    elif window.selected_fitting_method == "D-parameter":
+                    elif window.selected_fitting_method in ["D-parameter", "Fermi"]:
                         for col in [2]:  # Columns for Height, FWHM, L/G ratio
                             window.peak_params_grid.SetCellValue(row + 1, col, "0")
                             window.peak_params_grid.SetCellTextColour(row, col, wx.Colour(128, 128, 128))
@@ -401,6 +390,38 @@ def on_sheet_selected(window, event):
             window.file_manager.highlight_current_sheet(selected_sheet)
         except (RuntimeError, Exception):
             pass
+
+    # Update fitting screen range controls if fitting window is open
+    if (hasattr(window, 'fitting_window') and window.fitting_window is not None and
+            hasattr(window.fitting_window, 'update_range_controls_from_data')):
+        wx.CallAfter(window.fitting_window.update_range_controls_from_data)
+
+    # Use tab switching trick if fitting window is open and on background tab
+    if (hasattr(window, 'fitting_window') and window.fitting_window is not None and
+            hasattr(window, 'background_tab_selected') and window.background_tab_selected):
+
+        # Get the notebook from the fitting window
+        notebook = None
+        for child in window.fitting_window.GetChildren():
+            for grandchild in child.GetChildren():
+                if isinstance(grandchild, wx.Notebook):
+                    notebook = grandchild
+                    break
+            if notebook:
+                break
+
+        if notebook:
+            wx.CallAfter(window.fitting_window._switch_tabs_trick, notebook)
+
+    if (hasattr(window, 'background_window') and window.background_window is not None and
+            hasattr(window, 'area_tab_selected') and window.area_tab_selected):
+        wx.CallAfter(window.refresh_area_screen)
+
+    # Update results grid label at the end
+    if hasattr(window, 'update_results_grid_label'):
+        window.update_results_grid_label()
+
+    # window.plot_manager.clear_and_replot(window)
 
 def on_grid_left_click(window, event):
     if event.GetCol() == 7:  # Checkbox column
